@@ -16,7 +16,8 @@ firebase.initializeApp(firebaseConfig);
 const firebaseDb = firebase.database();
 const stateRef = firebaseDb.ref("appState");
 let firebaseReady = false;
-let isSavingToFirebase = false;
+let lastFirebaseSaveTime = 0;
+const FIREBASE_ECHO_DELAY = 3000; // Ignore listener echoes within 3 seconds of our own save
 
 // Firebase converts arrays to objects; this ensures they stay arrays
 function ensureArrays(data) {
@@ -40,14 +41,18 @@ function ensureArrays(data) {
   return data;
 }
 
+let syncStatusTimer = null;
 function showSyncStatus(type, message) {
   const el = document.getElementById("syncStatus");
   if (!el) return;
+  if (syncStatusTimer) clearTimeout(syncStatusTimer);
   el.className = "sync-status " + type;
   el.textContent = message;
   el.style.display = "block";
   if (type === "synced") {
-    setTimeout(() => { el.style.display = "none"; }, 2500);
+    syncStatusTimer = setTimeout(() => { el.style.display = "none"; }, 2000);
+  } else if (type === "error") {
+    syncStatusTimer = setTimeout(() => { el.style.display = "none"; }, 5000);
   }
 }
 
@@ -442,15 +447,15 @@ const statCardTemplate = document.querySelector("#statCardTemplate");
 function saveState() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   if (firebaseReady) {
-    isSavingToFirebase = true;
-    showSyncStatus("syncing", "同步中...");
-    stateRef.set(state)
+    lastFirebaseSaveTime = Date.now();
+    // Only sync non-session data to Firebase (session is per-device)
+    const syncData = { ...state };
+    delete syncData.session;
+    stateRef.set(syncData)
       .then(() => {
-        isSavingToFirebase = false;
-        showSyncStatus("synced", "已同步至雲端");
+        lastFirebaseSaveTime = Date.now();
       })
       .catch((err) => {
-        isSavingToFirebase = false;
         showSyncStatus("error", "同步失敗：" + err.message);
         console.warn("Firebase save failed:", err);
       });
@@ -2450,24 +2455,26 @@ render();
         }
         localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
         render();
-        showSyncStatus("synced", "已從雲端載入資料");
       }
     } else {
-      // First time: upload local state to Firebase
-      await stateRef.set(state);
-      showSyncStatus("synced", "已上傳資料至雲端");
+      // First time: upload local state to Firebase (exclude session)
+      const syncData = { ...state };
+      delete syncData.session;
+      await stateRef.set(syncData);
     }
+    lastFirebaseSaveTime = Date.now(); // Prevent initial listener echo
 
     firebaseReady = true;
     hideLoading();
 
     // Real-time listener for other users' changes
     stateRef.on("value", (snap) => {
-      if (isSavingToFirebase) return; // Skip our own writes
+      // Ignore echoes of our own writes (within 3 seconds)
+      if (Date.now() - lastFirebaseSaveTime < FIREBASE_ECHO_DELAY) return;
       if (!snap.exists()) return;
       const remoteState = ensureArrays(snap.val());
       if (!remoteState.employees || !remoteState.routes) return;
-      // Preserve local session
+      // Preserve local session (session is per-device, not synced)
       const localSession = { ...state.session };
       state = remoteState;
       state.session = localSession;
