@@ -696,9 +696,30 @@ function buildRoleHint(role) {
 }
 
 function syncSelectors() {
-  roleSelect.innerHTML = Object.entries(roleLabels)
-    .map(([role, label]) => `<option value="${role}" ${state.session.role === role ? "selected" : ""}>${label}</option>`)
-    .join("");
+  // Build role dropdown: for protected roles, show each person individually
+  let roleOptions = "";
+  Object.entries(roleLabels).forEach(([role, label]) => {
+    if (protectedRoles.includes(role)) {
+      const users = getRoleUsers(role);
+      if (users.length > 1) {
+        // Show each person as a separate option: "組長 - 齊x擷"
+        users.forEach((user) => {
+          const val = `${role}:${user.id}`;
+          const currentVal = `${state.session.role}:${state.session.userId}`;
+          const isSelected = (state.session.role === role && state.session.userId === user.id);
+          roleOptions += `<option value="${val}" ${isSelected ? "selected" : ""}>${label} - ${user.name}</option>`;
+        });
+      } else {
+        // Only one person, show normally
+        roleOptions += `<option value="${role}" ${state.session.role === role ? "selected" : ""}>${label}</option>`;
+      }
+    } else {
+      roleOptions += `<option value="${role}" ${state.session.role === role ? "selected" : ""}>${label}</option>`;
+    }
+  });
+  roleSelect.innerHTML = roleOptions;
+
+  // User dropdown: still show users for the selected role
   const users = getRoleUsers(state.session.role);
   if (!users.some((user) => user.id === state.session.userId)) {
     state.session.userId = users[0]?.id || "";
@@ -2517,21 +2538,33 @@ function render() {
 }
 
 roleSelect.addEventListener("change", (event) => {
-  const newRole = event.target.value;
-  const users = getRoleUsers(newRole);
-  const firstUser = users[0];
-  // For protected roles, ask for the first user's individual PIN
-  if (protectedRoles.includes(newRole) && firstUser) {
-    if (!requireUserPin(firstUser.id)) {
-      event.target.value = state.session.role;
+  const rawValue = event.target.value;
+  let newRole, targetUserId;
+
+  // Parse combined "role:userId" format
+  if (rawValue.includes(":")) {
+    const parts = rawValue.split(":");
+    newRole = parts[0];
+    targetUserId = parts[1];
+  } else {
+    newRole = rawValue;
+    targetUserId = getRoleUsers(newRole)[0]?.id || "";
+  }
+
+  // Verify PIN for the specific user
+  if (protectedRoles.includes(newRole) && targetUserId) {
+    if (!requireUserPin(targetUserId)) {
+      // Revert to previous selection
+      syncSelectors();
       return;
     }
   } else if (!requirePin(newRole)) {
-    event.target.value = state.session.role;
+    syncSelectors();
     return;
   }
+
   state.session.role = newRole;
-  state.session.userId = firstUser?.id || "";
+  state.session.userId = targetUserId;
   saveState();
   render();
 });
