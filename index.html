@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>物流排班查詢系統</title>
+  <link rel="stylesheet" href="./app.css">
+</head>
+<body>
+  <!-- Loading overlay -->
+  <div id="loadingOverlay" class="loading-overlay">
+    <div class="loading-card">
+      <div class="loading-spinner"></div>
+      <p>正在連線雲端資料庫...</p>
+    </div>
+  </div>
+
+  <!-- Sync status indicator -->
+  <div id="syncStatus" class="sync-status" style="display:none;"></div>
+
+  <div class="shell">
+    <header class="hero">
+      <div>
+        <p class="eyebrow">Logistics Shift Board</p>
+        <h1>物流排班查詢系統</h1>
+        <p class="hero-copy">手機優先的內部排班與異動查詢，讓員工只看自己的資訊，讓組長、行政與主管各自維護正確的資料。</p>
+      </div>
+      <div class="hero-controls card">
+        <label>
+          目前身分
+          <select id="roleSelect"></select>
+        </label>
+        <label>
+          目前帳號
+          <select id="userSelect"></select>
+        </label>
+        <p id="roleHint" class="hint"></p>
+      </div>
+    </header>
+
+    <main id="app" class="layout"></main>
+  </div>
+
+  <template id="statCardTemplate">
+    <article class="card stat-card">
+      <p class="stat-label"></p>
+      <p class="stat-value"></p>
+      <p class="stat-meta"></p>
+    </article>
+  </template>
+
+  <!-- Firebase SDK (compat for vanilla JS) -->
+  <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-database-compat.js"></script>
+
+  <script src="./app.js"></script>
+</body>
+</html>

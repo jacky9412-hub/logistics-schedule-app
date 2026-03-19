@@ -1,0 +1,2496 @@
+const STORAGE_KEY = "logistics-schedule-app-state-v7";
+
+// ─── Firebase Configuration ───
+const firebaseConfig = {
+  apiKey: "AIzaSyBl8BuPyoaHAIoa4yQkkmAHSgvl1l3kZsw",
+  authDomain: "logistics-schedule-2c6c5.firebaseapp.com",
+  databaseURL: "https://logistics-schedule-2c6c5-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "logistics-schedule-2c6c5",
+  storageBucket: "logistics-schedule-2c6c5.firebasestorage.app",
+  messagingSenderId: "515233843932",
+  appId: "1:515233843932:web:958248c6095362ac338219",
+  measurementId: "G-KEWZ2SMJYW",
+};
+
+firebase.initializeApp(firebaseConfig);
+const firebaseDb = firebase.database();
+const stateRef = firebaseDb.ref("appState");
+let firebaseReady = false;
+let isSavingToFirebase = false;
+
+// Firebase converts arrays to objects; this ensures they stay arrays
+function ensureArrays(data) {
+  if (!data) return data;
+  const arrayFields = ["employees", "routes", "assignments", "auditLogs"];
+  arrayFields.forEach((field) => {
+    if (data[field] && !Array.isArray(data[field])) {
+      data[field] = Object.values(data[field]);
+    }
+  });
+  if (data.companySettings?.holidays && !Array.isArray(data.companySettings.holidays)) {
+    data.companySettings.holidays = Object.values(data.companySettings.holidays);
+  }
+  if (data.employees && Array.isArray(data.employees)) {
+    data.employees.forEach((emp) => {
+      if (emp && emp.supportLineIds && !Array.isArray(emp.supportLineIds)) {
+        emp.supportLineIds = Object.values(emp.supportLineIds);
+      }
+    });
+  }
+  return data;
+}
+
+function showSyncStatus(type, message) {
+  const el = document.getElementById("syncStatus");
+  if (!el) return;
+  el.className = "sync-status " + type;
+  el.textContent = message;
+  el.style.display = "block";
+  if (type === "synced") {
+    setTimeout(() => { el.style.display = "none"; }, 2500);
+  }
+}
+
+function hideLoading() {
+  const overlay = document.getElementById("loadingOverlay");
+  if (overlay) {
+    overlay.classList.add("fade-out");
+    setTimeout(() => { overlay.remove(); }, 500);
+  }
+}
+
+const taiwanHolidaySeeds2026 = [
+  "2026-01-01",
+  "2026-02-16",
+  "2026-02-17",
+  "2026-02-18",
+  "2026-02-19",
+  "2026-02-20",
+  "2026-02-27",
+  "2026-04-03",
+  "2026-04-06",
+  "2026-05-01",
+  "2026-06-19",
+  "2026-09-25",
+  "2026-10-09",
+];
+
+function renderHolidaySeedList() {
+  return taiwanHolidaySeeds2026
+    .map((dateString) => `<span>${dateString}</span>`)
+    .join("");
+}
+
+function renderCompanyHolidayList() {
+  const holidays = [...state.companySettings.holidays].sort();
+  if (!holidays.length) {
+    return "<span>目前沒有公司休假日</span>";
+  }
+  return holidays
+    .map((dateString) => {
+      const isBuiltIn = taiwanHolidaySeeds2026.includes(dateString);
+      return `<span class="${isBuiltIn ? "" : "brand"}">${dateString}${isBuiltIn ? "" : "｜手動"}</span>`;
+    })
+    .join("");
+}
+
+const roleLabels = {
+  operator: "運務員",
+  teamLeader: "組長",
+  reliefStaff: "備員",
+  adminStaff: "行政",
+  supervisor: "主管",
+};
+
+const fixedEmployeeOrderByName = new Map([
+  ["洪主任", 1],
+  ["齊x擷", 2],
+  ["林x強", 3],
+  ["張xx怡", 4],
+  ["許x佳", 5],
+  ["劉x漢", 6],
+  ["陳x清", 7],
+]);
+
+const roleOrderForList = {
+  supervisor: 1,
+  teamLeader: 2,
+  adminStaff: 3,
+  reliefStaff: 4,
+  operator: 5,
+};
+
+const employmentStatusLabels = {
+  active: "在職",
+  resigned: "已離職",
+  unpaidLeave: "留職停薪",
+};
+
+const routeTypeLabels = {
+  car: "汽車線",
+  scooter: "機車段",
+  special: "特殊勤務",
+};
+
+const routeSeeds = [
+  { name: "大夜班", type: "special", approvedMileage: 6, owner: "何x霖" },
+  { name: "嘉義線", type: "car", approvedMileage: 279, owner: "黃x光" },
+  { name: "雲林線", type: "car", approvedMileage: 189, owner: "郭x順" },
+  { name: "苗栗線", type: "car", approvedMileage: 187, owner: "蔡x緯" },
+  { name: "員林線", type: "car", approvedMileage: 197, owner: "張x謙" },
+  { name: "大甲線", type: "car", approvedMileage: 167, owner: "姚x冰" },
+  { name: "埔里線", type: "car", approvedMileage: 210, owner: "張x豪" },
+  { name: "鹿港線", type: "car", approvedMileage: 118, owner: "陳x億" },
+  { name: "作業中心線", type: "car", approvedMileage: 62, owner: "藍x民" },
+  { name: "中區段(晚班)", type: "scooter", approvedMileage: 36, owner: "邱x庭" },
+  { name: "軍功段", type: "scooter", approvedMileage: 49, owner: "林x熙" },
+  { name: "南屯段", type: "scooter", approvedMileage: 47, owner: "黃x慶" },
+  { name: "市政段", type: "scooter", approvedMileage: 53, owner: "張x愷" },
+  { name: "黎明段", type: "scooter", approvedMileage: 57, owner: "陳x仁" },
+  { name: "松竹段", type: "scooter", approvedMileage: 66, owner: "吳x維" },
+  { name: "中工段", type: "scooter", approvedMileage: 81, owner: "黃x女" },
+  { name: "中港段", type: "scooter", approvedMileage: 52, owner: "趙x剛" },
+  { name: "文心段", type: "scooter", approvedMileage: 41, owner: "洪x賢" },
+  { name: "大雅段", type: "scooter", approvedMileage: 66, owner: "王x凱" },
+  { name: "太平段", type: "scooter", approvedMileage: 45, owner: "許x瑞" },
+  { name: "大里段", type: "scooter", approvedMileage: 64, owner: "李x文" },
+  { name: "東勢段", type: "scooter", approvedMileage: 94, owner: "楊x豐" },
+  { name: "后里段", type: "scooter", approvedMileage: 88, owner: "劉x宗" },
+  { name: "清水段", type: "scooter", approvedMileage: 77, owner: "江x宗" },
+  { name: "沙鹿段", type: "scooter", approvedMileage: 70, owner: "吳x峰" },
+  { name: "梧棲段(半日)", type: "scooter", approvedMileage: 67, owner: "羅x遠" },
+  { name: "玉山大雅(半日)", type: "scooter", approvedMileage: 43, owner: "魏x安" },
+  { name: "玉山南屯(晚班)", type: "scooter", approvedMileage: 30, owner: "傅x瑜" },
+  { name: "市政二段(晚班)", type: "scooter", approvedMileage: 38, owner: "歐x豪" },
+  { name: "南區段(晚班)", type: "scooter", approvedMileage: 28, owner: "賴x瑋" },
+  { name: "彰化段", type: "scooter", approvedMileage: 103, owner: "魏x洋" },
+  { name: "和美段", type: "scooter", approvedMileage: 97, owner: "葉x昇" },
+  { name: "員林段", type: "scooter", approvedMileage: 50, owner: "黃x鈞" },
+  { name: "溪湖段", type: "scooter", approvedMileage: 44, owner: "陳x佑" },
+  { name: "頭份段", type: "scooter", approvedMileage: 61, owner: "謝x軒" },
+  { name: "竹南段", type: "scooter", approvedMileage: 61, owner: "俞x弘" },
+  { name: "草屯段", type: "scooter", approvedMileage: 88, owner: "洪x斌" },
+  { name: "竹山段", type: "scooter", approvedMileage: 116, owner: "柳x傑" },
+  { name: "南投段(半日)", type: "scooter", approvedMileage: 70, owner: "黃x瑋" },
+  { name: "西螺段", type: "scooter", approvedMileage: 78, owner: "陳x享" },
+  { name: "北港段", type: "scooter", approvedMileage: 104, owner: "蔡x偉" },
+  { name: "虎尾段", type: "scooter", approvedMileage: 65, owner: "沈x謙" },
+  { name: "中埔段", type: "scooter", approvedMileage: 66, owner: "徐x文" },
+  { name: "朴子段", type: "scooter", approvedMileage: 76, owner: "蔡x貴" },
+  { name: "新港段", type: "scooter", approvedMileage: 62, owner: "林x聖" },
+];
+
+const specialStaffSeeds = [
+  { name: "齊x擷", role: "teamLeader", isRelief: false },
+  { name: "林x強", role: "teamLeader", isRelief: false },
+  { name: "許x佳", role: "reliefStaff", isRelief: true },
+  { name: "劉x漢", role: "reliefStaff", isRelief: true },
+  { name: "陳x清", role: "reliefStaff", isRelief: true },
+  { name: "張xx怡", role: "adminStaff", isRelief: false },
+  { name: "洪主任", role: "supervisor", isRelief: false },
+];
+
+const shiftCoverageOperators = new Set([
+  "林x熙",
+  "黃x慶",
+  "張x愷",
+  "陳x仁",
+  "吳x維",
+  "黃x女",
+  "趙x剛",
+  "洪x賢",
+  "許x瑞",
+  "李x文",
+  "陳x享",
+  "蔡x偉",
+  "沈x謙",
+  "徐x文",
+  "蔡x貴",
+  "林x聖",
+]);
+
+function makeId(prefix) {
+  return `${prefix}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function inferShift(routeName) {
+  if (routeName.includes("大夜班")) {
+    return "night";
+  }
+  if (routeName.includes("晚班")) {
+    return "evening";
+  }
+  return "day";
+}
+
+function isWeekend(dateString) {
+  const day = new Date(`${dateString}T00:00:00`).getDay();
+  return day === 0 || day === 6;
+}
+
+function enumerateDates(startDate, endDate) {
+  const dates = [];
+  const current = new Date(`${startDate}T00:00:00`);
+  const end = new Date(`${endDate}T00:00:00`);
+  while (current <= end) {
+    const year = current.getFullYear();
+    const month = String(current.getMonth() + 1).padStart(2, "0");
+    const day = String(current.getDate()).padStart(2, "0");
+    dates.push(`${year}-${month}-${day}`);
+    current.setDate(current.getDate() + 1);
+  }
+  return dates;
+}
+
+function getWorkingDates(startDate, endDate, companySettings) {
+  return enumerateDates(startDate, endDate).filter((dateString) => {
+    if (companySettings.weekendDaysOff && isWeekend(dateString)) {
+      return false;
+    }
+    return !companySettings.holidays.includes(dateString);
+  });
+}
+
+function buildInitialState() {
+  const routes = routeSeeds.map((route, index) => ({
+    id: `route-${String(index + 1).padStart(3, "0")}`,
+    type: route.type,
+    name: route.name,
+    approvedMileage: route.approvedMileage,
+  }));
+
+  const employees = [
+    ...specialStaffSeeds.map((employee, index) => ({
+      id: `emp-special-${String(index + 1).padStart(2, "0")}`,
+      name: employee.name,
+      role: employee.role,
+      defaultRouteId: "",
+      supportLineIds: [],
+      isRelief: employee.isRelief,
+      canCoverShift: employee.isRelief || ["teamLeader", "supervisor"].includes(employee.role),
+      shift: "day",
+      employmentStatus: "active",
+      active: true,
+      fixedDuty: "",
+      isNightOwner: false,
+    })),
+    ...routeSeeds.map((route, index) => ({
+      id: `emp-${String(index + 1).padStart(3, "0")}`,
+      name: route.owner,
+      role: "operator",
+      defaultRouteId: routes[index].id,
+      supportLineIds: [routes[index].id],
+      isRelief: false,
+      canCoverShift: shiftCoverageOperators.has(route.owner),
+      shift: inferShift(route.name),
+      employmentStatus: "active",
+      active: true,
+      fixedDuty: route.name,
+      isNightOwner: route.name === "大夜班",
+    })),
+  ];
+
+  const companySettings = {
+    weekendDaysOff: true,
+    holidays: [...taiwanHolidaySeeds2026],
+  };
+
+  const assignments = [];
+  const dates = getWorkingDates("2026-03-18", "2026-03-31", companySettings);
+  employees.filter((employee) => employee.defaultRouteId).forEach((employee) => {
+    dates.forEach((dateString) => {
+      assignments.push({
+        id: makeId("asg"),
+        date: dateString,
+        employeeId: employee.id,
+        routeId: employee.defaultRouteId,
+        shift: employee.shift,
+        status: "working",
+        leaveType: "",
+        note: "",
+        source: "default",
+      });
+    });
+  });
+
+  const nightOwner = employees.find((employee) => employee.name === "何x霖");
+  const relief = employees.find((employee) => employee.role === "reliefStaff");
+  if (nightOwner && relief) {
+    const leaveAssignment = assignments.find((assignment) => assignment.employeeId === nightOwner.id && assignment.date === "2026-03-20");
+    if (leaveAssignment) {
+      leaveAssignment.status = "leave";
+      leaveAssignment.leaveType = "annual";
+      leaveAssignment.note = "固定大夜班休假";
+      leaveAssignment.source = "override";
+    }
+    assignments.push({
+      id: makeId("asg"),
+      date: "2026-03-20",
+      employeeId: relief.id,
+      routeId: nightOwner.defaultRouteId,
+      shift: "night",
+      status: "reassigned",
+      leaveType: "",
+      note: "代班大夜班",
+      source: "override",
+    });
+  }
+
+  return {
+    session: {
+      role: "operator",
+      userId: nightOwner?.id || employees[0].id,
+      lastGeneratedRange: null,
+    },
+    labelSettings: {
+      shifts: { day: "白班", evening: "晚班", night: "大夜班" },
+      leaveTypes: { annual: "特休", personal: "事假", sick: "病假", official: "公假", injury: "公傷", other: "其他" },
+      statuses: { working: "上班", leave: "休假", reassigned: "代班", standby: "待命" },
+    },
+    companySettings,
+    pinSettings: {
+      teamLeader: "1234",
+      adminStaff: "1234",
+      supervisor: "0000",
+    },
+    employees,
+    routes,
+    assignments,
+    auditLogs: [
+      {
+        id: makeId("log"),
+        timestamp: "2026-03-18T08:20:00+08:00",
+        actorId: employees.find((employee) => employee.role === "teamLeader")?.id || employees[0].id,
+        action: "default-sync",
+        targetType: "assignment",
+        targetId: "seed-defaults",
+        summary: "初始化 Excel 固定配置班表",
+        detail: "已載入固定路線、人員與核定里程，並建立預設班表。",
+      },
+    ],
+  };
+}
+
+function loadState() {
+  const stored = localStorage.getItem(STORAGE_KEY);
+  if (!stored) {
+    return buildInitialState();
+  }
+  try {
+    const parsed = JSON.parse(stored);
+    if (!parsed.routes?.[0]?.approvedMileage || !parsed.employees?.some((employee) => "defaultRouteId" in employee)) {
+      return buildInitialState();
+    }
+    parsed.employees.forEach((employee) => {
+      const isLeaderOrSupervisor = ["teamLeader", "supervisor"].includes(employee.role);
+      const isCoverageOperator = shiftCoverageOperators.has(employee.name);
+      if (!employee.employmentStatus) {
+        employee.employmentStatus = employee.active ? "active" : "resigned";
+      }
+      employee.active = employee.employmentStatus === "active";
+      if (isLeaderOrSupervisor || isCoverageOperator) {
+        employee.canCoverShift = true;
+      } else if (typeof employee.canCoverShift !== "boolean") {
+        employee.canCoverShift = !!employee.isRelief;
+      }
+    });
+    parsed.session = parsed.session || {};
+    parsed.session.lastGeneratedRange = parsed.session.lastGeneratedRange || null;
+    parsed.labelSettings = parsed.labelSettings || {};
+    parsed.labelSettings.leaveTypes = {
+      annual: "特休",
+      personal: "事假",
+      sick: "病假",
+      official: "公假",
+      injury: "公傷",
+      other: "其他",
+      ...(parsed.labelSettings.leaveTypes || {}),
+    };
+    if (!parsed.pinSettings) {
+      parsed.pinSettings = { teamLeader: "1234", adminStaff: "1234", supervisor: "0000" };
+    }
+    return parsed;
+  } catch (error) {
+    return buildInitialState();
+  }
+}
+
+let state = loadState();
+const authenticatedRoles = new Set();
+
+const protectedRoles = ["teamLeader", "adminStaff", "supervisor"];
+
+function requirePin(role) {
+  if (!protectedRoles.includes(role)) return true;
+  if (authenticatedRoles.has(role)) return true;
+  const pin = window.prompt(`請輸入「${roleLabels[role]}」的 PIN 碼：`);
+  if (pin === null) return false;
+  if (pin === state.pinSettings[role]) {
+    authenticatedRoles.add(role);
+    return true;
+  }
+  window.alert("PIN 碼錯誤，無法切換至該角色。");
+  return false;
+}
+
+const appEl = document.querySelector("#app");
+const roleSelect = document.querySelector("#roleSelect");
+const userSelect = document.querySelector("#userSelect");
+const roleHint = document.querySelector("#roleHint");
+const statCardTemplate = document.querySelector("#statCardTemplate");
+
+function saveState() {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  if (firebaseReady) {
+    isSavingToFirebase = true;
+    showSyncStatus("syncing", "同步中...");
+    stateRef.set(state)
+      .then(() => {
+        isSavingToFirebase = false;
+        showSyncStatus("synced", "已同步至雲端");
+      })
+      .catch((err) => {
+        isSavingToFirebase = false;
+        showSyncStatus("error", "同步失敗：" + err.message);
+        console.warn("Firebase save failed:", err);
+      });
+  }
+}
+
+function getToday() {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function getEmployeeById(id) {
+  return state.employees.find((employee) => employee.id === id);
+}
+
+function compareEmployeesByScheduleOrder(a, b) {
+  const fixedA = fixedEmployeeOrderByName.get(a?.name) || 999;
+  const fixedB = fixedEmployeeOrderByName.get(b?.name) || 999;
+  if (fixedA !== fixedB) {
+    return fixedA - fixedB;
+  }
+
+  const roleA = roleOrderForList[a?.role] || 99;
+  const roleB = roleOrderForList[b?.role] || 99;
+  if (roleA !== roleB) {
+    return roleA - roleB;
+  }
+
+  return (a?.name || "").localeCompare((b?.name || ""), "zh-Hant");
+}
+
+function getRouteById(id) {
+  return state.routes.find((route) => route.id === id);
+}
+
+function getDefaultRoute(employee) {
+  return employee?.defaultRouteId ? getRouteById(employee.defaultRouteId) : null;
+}
+
+function getAssignmentsForEmployee(employeeId) {
+  return state.assignments
+    .filter((assignment) => assignment.employeeId === employeeId)
+    .sort((a, b) => a.date.localeCompare(b.date));
+}
+
+function getAssignmentByEmployeeDate(employeeId, dateString) {
+  return state.assignments.find((assignment) => assignment.employeeId === employeeId && assignment.date === dateString);
+}
+
+function getAssignmentsByDate(dateString) {
+  return state.assignments
+    .filter((assignment) => assignment.date === dateString)
+    .sort((a, b) => compareEmployeesByScheduleOrder(getEmployeeById(a.employeeId), getEmployeeById(b.employeeId)));
+}
+
+function getRoleUsers(role) {
+  return state.employees
+    .filter((employee) => employee.role === role && employee.employmentStatus === "active")
+    .sort(compareEmployeesByScheduleOrder);
+}
+
+function getLabel(group, key) {
+  return state.labelSettings[group][key] || key;
+}
+
+function displayRouteType(type) {
+  return routeTypeLabels[type] || type;
+}
+
+function formatDate(dateString) {
+  return new Intl.DateTimeFormat("zh-TW", { month: "numeric", day: "numeric", weekday: "short" })
+    .format(new Date(`${dateString}T00:00:00`));
+}
+
+function formatTimestamp(timestamp) {
+  return new Intl.DateTimeFormat("zh-TW", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })
+    .format(new Date(timestamp));
+}
+
+function getMonthRange(baseDateString = getToday(), offsetMonths = 0) {
+  const base = new Date(`${baseDateString}T00:00:00`);
+  const year = base.getFullYear();
+  const month = base.getMonth() + offsetMonths;
+  const first = new Date(year, month, 1);
+  const last = new Date(year, month + 1, 0);
+  const toDateString = (date) => {
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, "0");
+    const d = String(date.getDate()).padStart(2, "0");
+    return `${y}-${m}-${d}`;
+  };
+  return {
+    year: first.getFullYear(),
+    month: first.getMonth() + 1,
+    startDate: toDateString(first),
+    endDate: toDateString(last),
+    dates: enumerateDates(toDateString(first), toDateString(last)),
+  };
+}
+
+function isHoliday(dateString) {
+  if (state.companySettings.weekendDaysOff && isWeekend(dateString)) {
+    return true;
+  }
+  return state.companySettings.holidays.includes(dateString);
+}
+
+function getDisplayAssignment(employee, dateString) {
+  const assignment = getAssignmentByEmployeeDate(employee.id, dateString);
+  if (assignment) {
+    return assignment;
+  }
+  const defaultRoute = getDefaultRoute(employee);
+  if (defaultRoute && !isHoliday(dateString)) {
+    return {
+      employeeId: employee.id,
+      date: dateString,
+      routeId: defaultRoute.id,
+      shift: employee.shift,
+      status: "scheduled",
+      leaveType: "",
+      note: "",
+      source: "default-preview",
+    };
+  }
+  return null;
+}
+
+function logAction({ actorId, action, targetType, targetId, summary, detail }) {
+  state.auditLogs.unshift({
+    id: makeId("log"),
+    timestamp: new Date().toISOString(),
+    actorId,
+    action,
+    targetType,
+    targetId,
+    summary,
+    detail,
+  });
+}
+
+function buildStatCard(label, value, meta) {
+  const node = statCardTemplate.content.firstElementChild.cloneNode(true);
+  node.querySelector(".stat-label").textContent = label;
+  node.querySelector(".stat-value").textContent = value;
+  node.querySelector(".stat-meta").textContent = meta;
+  return node;
+}
+
+function createSection(title, subtitle = "") {
+  const section = document.createElement("section");
+  section.className = "card panel";
+  const heading = document.createElement("div");
+  heading.className = "section-heading";
+  heading.innerHTML = `<div><h2>${title}</h2>${subtitle ? `<p class="muted">${subtitle}</p>` : ""}</div>`;
+  section.appendChild(heading);
+  return section;
+}
+
+function employeeOptions({ includeAll = true, includeReliefOnly = false } = {}) {
+  return state.employees
+    .filter((employee) => employee.employmentStatus === "active")
+    .filter((employee) => (includeReliefOnly ? (employee.isRelief || employee.canCoverShift) : true))
+    .filter((employee) => (includeAll ? true : employee.role === "operator"))
+    .sort(compareEmployeesByScheduleOrder)
+    .map((employee) => {
+      const tags = [roleLabels[employee.role]];
+      if (employee.isRelief) tags.push("備員");
+      if (!employee.isRelief && employee.canCoverShift) tags.push("可支援代班");
+      return `<option value="${employee.id}">${employee.name} | ${tags.join(" | ")}</option>`;
+    })
+    .join("");
+}
+
+function routeOptions() {
+  return state.routes
+    .map((route) => `<option value="${route.id}">${route.name} | 核定里程 ${route.approvedMileage}</option>`)
+    .join("");
+}
+
+function labelOptions(group) {
+  return Object.entries(state.labelSettings[group])
+    .map(([key, value]) => `<option value="${key}">${value}</option>`)
+    .join("");
+}
+
+function describeAssignment(assignment) {
+  const route = getRouteById(assignment.routeId);
+  return `${getLabel("shifts", assignment.shift)} / ${route ? route.name : "未指定路線"} / ${getLabel("statuses", assignment.status)}`;
+}
+
+function buildRoleHint(role) {
+  if (role === "operator") return "運務員可查看自己的今日班別、路線與假別資訊。";
+  if (role === "reliefStaff") return "備員平常不綁固定路線，主要在異動時支援代班。";
+  if (role === "teamLeader") return "組長可生成固定班表、登記請假並安排代班。";
+  if (role === "adminStaff") return "行政可維護員工、路線、核定里程與公司休假日。";
+  return "主管可查看全體班表、異動紀錄並進行全權編修。";
+}
+
+function syncSelectors() {
+  roleSelect.innerHTML = Object.entries(roleLabels)
+    .map(([role, label]) => `<option value="${role}" ${state.session.role === role ? "selected" : ""}>${label}</option>`)
+    .join("");
+  const users = getRoleUsers(state.session.role);
+  if (!users.some((user) => user.id === state.session.userId)) {
+    state.session.userId = users[0]?.id || "";
+  }
+  userSelect.innerHTML = users
+    .map((user) => `<option value="${user.id}" ${state.session.userId === user.id ? "selected" : ""}>${user.name}</option>`)
+    .join("");
+}
+
+function renderPrototypeNotice() {
+  const section = document.createElement("section");
+  section.className = "card panel";
+  section.innerHTML = `
+    <div class="section-heading">
+      <div>
+        <h2>正式資料排班測試版</h2>
+        <p class="muted">目前使用正式路線與人員名單，先驗證固定配置、請假、代班與異動流程；確認穩定後再持續擴充。</p>
+      </div>
+    </div>
+    <div class="tag-row">
+      <span class="tag">員工 ${state.employees.filter((e) => e.employmentStatus === "active").length} 人</span>
+      <span class="tag">路線 ${state.routes.length} 條</span>
+      <span class="tag">備員 ${state.employees.filter((e) => e.role === "reliefStaff" && e.employmentStatus === "active").length} 人</span>
+      <span class="tag">固定配置 + 異動覆蓋</span>
+    </div>
+  `;
+  return section;
+}
+
+function renderDailyBoardLauncher() {
+  const section = document.createElement("section");
+  section.className = "card panel";
+  section.innerHTML = `
+    <div class="section-heading">
+      <div>
+        <h2>操作捷徑</h2>
+        <p class="muted">可另開視窗查看今日全體班表。</p>
+      </div>
+      <button type="button" class="secondary" id="openDailyBoardTopButton">今日全體班表</button>
+    </div>
+  `;
+  section.querySelector("#openDailyBoardTopButton").addEventListener("click", () => {
+    openDailyBoardWindow();
+  });
+  return section;
+}
+
+function renderManagementLaunchers() {
+  const section = document.createElement("section");
+  const lastRange = state.session.lastGeneratedRange;
+  const defaultStart = lastRange?.startDate || getMonthRange(getToday(), 0).startDate;
+  const defaultEnd = lastRange?.endDate || getMonthRange(getToday(), 0).endDate;
+  section.className = "card panel";
+  section.innerHTML = `
+    <div class="section-heading">
+      <div>
+        <h2>管理捷徑</h2>
+        <p class="muted">可查看今日全體班表，或自選日期區間查看班表與休假總表。</p>
+      </div>
+      <button type="button" class="secondary" id="openDailyBoardTopButton">今日全體班表</button>
+    </div>
+    <form id="rangeBoardForm" class="form-grid" style="margin-top:12px;">
+      <label>開始日期<input name="startDate" type="date" value="${defaultStart}"></label>
+      <label>結束日期<input name="endDate" type="date" value="${defaultEnd}"></label>
+      <div class="action-row">
+        <button type="submit">查看選擇區間班表</button>
+        <button type="button" class="secondary" id="openLeaveSummaryButton">查看休假總表</button>
+      </div>
+    </form>
+  `;
+  section.querySelector("#openDailyBoardTopButton").addEventListener("click", () => {
+    openDailyBoardWindow();
+  });
+  section.querySelector("#rangeBoardForm").addEventListener("submit", (event) => {
+    event.preventDefault();
+    const fd = new FormData(event.currentTarget);
+    const s = fd.get("startDate");
+    const e = fd.get("endDate");
+    if (!s || !e || s > e) { window.alert("請確認日期區間正確。"); return; }
+    openRangeBoardWindow(s, e);
+  });
+  section.querySelector("#openLeaveSummaryButton").addEventListener("click", () => {
+    const form = section.querySelector("#rangeBoardForm");
+    const s = form.elements.startDate.value;
+    const e = form.elements.endDate.value;
+    if (!s || !e || s > e) { window.alert("請確認日期區間正確。"); return; }
+    openLeaveSummaryWindow(s, e);
+  });
+  return section;
+}
+
+function renderStats(currentUser) {
+  const stats = document.createElement("section");
+  stats.className = "stats-grid";
+  const todayAssignments = getAssignmentsByDate(getToday());
+  const fixedEmployees = state.employees.filter((employee) => employee.defaultRouteId).length;
+  const overrides = todayAssignments.filter((assignment) => assignment.source === "override").length;
+  const leaves = todayAssignments.filter((assignment) => assignment.status === "leave").length;
+  stats.appendChild(buildStatCard("今日班表", `${todayAssignments.length} 筆`, "固定配置 + 異動覆蓋"));
+  stats.appendChild(buildStatCard("固定配置人員", `${fixedEmployees} 人`, "平常有固定路線的人員"));
+  stats.appendChild(buildStatCard("今日請假", `${leaves} 筆`, "含連續請假與代班安排"));
+  stats.appendChild(buildStatCard("今日異動", `${overrides} 筆`, "請假、代班、臨時支援"));
+  stats.appendChild(buildStatCard("目前登入", currentUser.name, roleLabels[currentUser.role]));
+  return stats;
+}
+
+function renderEmployeeHome(currentUser) {
+  const wrap = document.createElement("section");
+  wrap.className = "panel-grid";
+  const todaySection = createSection("我的今日班別", "系統同時顯示固定配置與當日實際安排。");
+  const todayAssignment = getAssignmentByEmployeeDate(currentUser.id, getToday());
+  const defaultRoute = getDefaultRoute(currentUser);
+  const todayBody = document.createElement("div");
+  todayBody.className = "split";
+  const highlight = document.createElement("div");
+  highlight.className = "employee-highlight";
+
+  if (todayAssignment) {
+    const route = getRouteById(todayAssignment.routeId);
+    const differs = !!defaultRoute && route && defaultRoute.id !== route.id;
+    highlight.innerHTML = `
+      <div class="tag-row">
+        <span class="pill brand">${getLabel("shifts", todayAssignment.shift)}</span>
+        <span class="pill ${todayAssignment.status === "leave" ? "alert" : ""}">${getLabel("statuses", todayAssignment.status)}</span>
+        ${todayAssignment.leaveType ? `<span class="pill alert">${getLabel("leaveTypes", todayAssignment.leaveType)}</span>` : ""}
+        <span class="pill">${todayAssignment.source === "default" ? "固定配置" : "異動覆蓋"}</span>
+        ${todayAssignment.status === "reassigned" || differs ? `<span class="pill brand">代班 / 支援</span>` : ""}
+      </div>
+      ${route
+        ? `<div class="big-value">${route.name}</div>
+           <div class="inline-list">
+             <span>${displayRouteType(route.type)}</span>
+             <span>核定里程 ${route.approvedMileage} 公里</span>
+             <span>${todayAssignment.note || "無備註"}</span>
+           </div>`
+        : `<p class="no-route-notice" style="font-size:0.95rem;font-weight:600;margin:4px 0;">未指定路線</p>
+           <p class="muted" style="margin:0;font-size:0.85rem;">${todayAssignment.note || "尚未指派路線，請聯繫管理端。"}</p>`
+      }
+      <div class="notice">${defaultRoute ? `固定配置：${defaultRoute.name}${differs ? `，今日改派：${route?.name || "未指定路線"}` : ""}` : "目前沒有固定路線，可由管理端安排支援。"}</div>
+    `;
+  } else if (defaultRoute) {
+    highlight.innerHTML = `
+      <div class="tag-row">
+        <span class="pill brand">${getLabel("shifts", currentUser.shift)}</span>
+        <span class="pill">固定配置</span>
+      </div>
+      <div class="big-value">${defaultRoute.name}</div>
+      <div class="inline-list">
+        <span>${displayRouteType(defaultRoute.type)}</span>
+        <span>核定里程 ${defaultRoute.approvedMileage} 公里</span>
+        <span>今日無異動，沿用固定配置</span>
+      </div>
+      <div class="notice">若有臨時調整，請由組長或主管在管理端異動。</div>
+    `;
+  } else {
+    highlight.innerHTML = `
+      <div class="empty-state" style="text-align:left;">
+        <p style="font-size:0.95rem;font-weight:600;margin:0 0 4px;color:var(--muted);">今日未指定路線</p>
+        <p class="muted" style="margin:0;font-size:0.85rem;">此角色預設不綁固定路線，若需支援請由管理端安排。</p>
+      </div>
+    `;
+  }
+
+  const profile = document.createElement("div");
+  profile.className = "card stat-card";
+  profile.innerHTML = `
+    <p class="stat-label">人員資訊</p>
+    <p class="stat-value">${currentUser.name}</p>
+    <div class="tag-row">
+      <span class="tag">${roleLabels[currentUser.role]}</span>
+      <span class="tag">${getLabel("shifts", currentUser.shift)}</span>
+      ${currentUser.isRelief ? `<span class="tag">備員</span>` : ""}
+      ${currentUser.isNightOwner ? `<span class="tag">固定大夜班</span>` : ""}
+    </div>
+    <p class="muted">固定路線：${defaultRoute ? `${defaultRoute.name} / 核定里程 ${defaultRoute.approvedMileage} 公里` : "未設定"}</p>
+  `;
+
+  todayBody.append(highlight, profile);
+  todaySection.appendChild(todayBody);
+
+  const upcomingSection = createSection("我的近期班表", "顯示未來 10 筆班表，包含固定配置與異動覆蓋。");
+  const upcomingAssignments = getAssignmentsForEmployee(currentUser.id)
+    .filter((assignment) => assignment.date >= getToday())
+    .slice(0, 10);
+  upcomingSection.appendChild(renderAssignmentTable(upcomingAssignments, false));
+
+  wrap.append(todaySection, upcomingSection);
+  return wrap;
+}
+
+function renderAssignmentTable(assignments, includeEmployee = true) {
+  if (!assignments.length) {
+    const empty = document.createElement("div");
+    empty.className = "empty-state";
+    empty.innerHTML = "<p>目前沒有可顯示的班表資料。</p>";
+    return empty;
+  }
+
+  const wrap = document.createElement("div");
+  wrap.className = "table-card";
+  const headers = ["日期", ...(includeEmployee ? ["員工"] : []), "固定配置", "今日路線", "核定里程", "狀態", "假別", "來源", "備註"];
+  const rows = assignments.map((assignment) => {
+    const employee = getEmployeeById(assignment.employeeId);
+    const route = getRouteById(assignment.routeId);
+    const defaultRoute = getDefaultRoute(employee);
+    return `
+      <tr>
+        <td>${formatDate(assignment.date)}</td>
+        ${includeEmployee ? `<td>${employee ? employee.name : assignment.employeeId}</td>` : ""}
+        <td>${defaultRoute ? defaultRoute.name : "未指定路線"}</td>
+        <td>${route ? route.name : "-"}</td>
+        <td>${route ? `${route.approvedMileage} 公里` : "-"}</td>
+        <td>${getLabel("statuses", assignment.status)}</td>
+        <td>${assignment.leaveType ? getLabel("leaveTypes", assignment.leaveType) : "-"}</td>
+        <td>${assignment.source === "default" ? "固定配置" : "異動覆蓋"}</td>
+        <td>${assignment.note || "-"}</td>
+      </tr>
+    `;
+  }).join("");
+
+  wrap.innerHTML = `
+    <table>
+      <thead>
+        <tr>${headers.map((header) => `<th>${header}</th>`).join("")}</tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>
+  `;
+  return wrap;
+}
+
+function renderSchedulingWorkbench(currentUser) {
+  return renderSchedulingWorkbenchV2(currentUser);
+}
+
+function renderSchedulingWorkbenchV2(currentUser) {
+  const section = createSection("排班與異動工作台", "先生成固定班表，再針對請假、代班或支援做後續調整。");
+  const grid = document.createElement("div");
+  grid.className = "panel-grid";
+
+  const defaultForm = document.createElement("div");
+  defaultForm.className = "card panel";
+  defaultForm.innerHTML = `
+    <div class="section-heading">
+      <div>
+        <h3>生成固定班表</h3>
+        <p class="muted">請先自行確認日期區間，再產生固定班表。</p>
+      </div>
+    </div>
+    <form id="defaultScheduleFormV2" class="form-grid">
+      <label>開始日期<input name="startDate" type="date" value="${getToday()}"></label>
+      <label>結束日期<input name="endDate" type="date" value="${getMonthRange(getToday(), 0).endDate}"></label>
+      <label>指定員工<select name="employeeId"><option value="">全部固定班表人員</option>${employeeOptions({ includeAll: true })}</select></label>
+      <button type="submit">生成指定區間固定班表</button>
+      <button type="button" class="secondary" id="fillNextMonthButton">帶入次月日期</button>
+    </form>
+  `;
+
+  const leaveForm = document.createElement("div");
+  leaveForm.className = "card panel";
+  leaveForm.innerHTML = `
+    <div class="section-heading">
+      <div>
+        <h3>登記請假</h3>
+        <p class="muted">選擇員工與日期區間，一次標記整段休假。代班請到下方另行指派。</p>
+      </div>
+    </div>
+    <form id="leaveOnlyForm" class="form-grid">
+      <label>開始日期<input name="startDate" type="date" value="${getToday()}"></label>
+      <label>結束日期<input name="endDate" type="date" value="${getToday()}"></label>
+      <label>請假員工<select name="employeeId">${employeeOptions({ includeAll: true })}</select></label>
+      <label>假別<select name="leaveType">${labelOptions("leaveTypes")}</select></label>
+      <label>備註<textarea name="note" placeholder="例如：連續特休、家庭因素"></textarea></label>
+      <button type="submit">儲存請假</button>
+    </form>
+  `;
+
+  const reliefForm = document.createElement("div");
+  reliefForm.className = "card panel";
+  reliefForm.innerHTML = `
+    <div class="section-heading">
+      <div>
+        <h3>派遣代班</h3>
+        <p class="muted">針對已請假的員工，分段指派不同代班人員。可多次操作。</p>
+      </div>
+    </div>
+    <form id="reliefOnlyForm" class="form-grid">
+      <label>代班開始日期<input name="startDate" type="date" value="${getToday()}"></label>
+      <label>代班結束日期<input name="endDate" type="date" value="${getToday()}"></label>
+      <label>被代班員工（請假者）<select name="originalEmployeeId">${employeeOptions({ includeAll: true })}</select></label>
+      <label>代班人員<select name="reliefEmployeeId">${employeeOptions({ includeReliefOnly: true })}</select></label>
+      <label>代班路線<select name="routeId"><option value="">沿用請假者固定路線</option>${routeOptions()}</select></label>
+      <label>備註<textarea name="note" placeholder="例如：支援大夜班、臨時調度"></textarea></label>
+      <button type="submit">儲存代班</button>
+    </form>
+  `;
+
+  const editPanel = document.createElement("div");
+  editPanel.className = "card panel";
+  editPanel.innerHTML = `
+    <div class="section-heading">
+      <div>
+        <h3>編輯 / 刪除排班</h3>
+        <p class="muted">輸入錯誤的請假或代班，可查詢單日或日期區間後修改或批量刪除。</p>
+      </div>
+    </div>
+    <div class="form-grid">
+      <label>開始日期<input type="date" id="editLookupStartDate" value="${getToday()}"></label>
+      <label>結束日期<input type="date" id="editLookupEndDate" value="${getToday()}"></label>
+      <label>員工<select id="editLookupEmployee">${employeeOptions({ includeAll: true })}</select></label>
+      <button type="button" id="editLookupButton">查詢排班</button>
+    </div>
+    <div id="editResultArea"></div>
+  `;
+
+  grid.append(defaultForm, leaveForm, reliefForm, editPanel);
+  section.appendChild(grid);
+
+  editPanel.querySelector("#editLookupButton").addEventListener("click", () => {
+    const startDate = editPanel.querySelector("#editLookupStartDate").value;
+    const endDate = editPanel.querySelector("#editLookupEndDate").value;
+    const empId = editPanel.querySelector("#editLookupEmployee").value;
+    const resultArea = editPanel.querySelector("#editResultArea");
+    if (!startDate || !endDate || !empId) { window.alert("請選擇日期區間與員工。"); return; }
+    if (startDate > endDate) { window.alert("結束日期不可早於開始日期。"); return; }
+
+    const emp = getEmployeeById(empId);
+    const dates = enumerateDates(startDate, endDate);
+    const matches = dates
+      .map((d) => ({ date: d, assignment: getAssignmentByEmployeeDate(empId, d) }))
+      .filter((item) => item.assignment);
+
+    if (!matches.length) {
+      resultArea.innerHTML = `<div class="empty-state" style="margin-top:12px;"><p>${emp?.name || empId} 在 ${formatDate(startDate)} ~ ${formatDate(endDate)} 沒有排班記錄。</p></div>`;
+      return;
+    }
+
+    const isSingle = matches.length === 1;
+
+    const listHtml = matches.map((item) => {
+      const a = item.assignment;
+      const route = getRouteById(a.routeId);
+      return `
+        <div class="card stat-card" style="margin-top:8px;" data-asg-id="${a.id}">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;">
+            <div>
+              <p class="stat-label">${formatDate(a.date)}</p>
+              <div class="tag-row" style="margin:6px 0;">
+                <span class="pill brand">${getLabel("shifts", a.shift)}</span>
+                <span class="pill ${a.status === "leave" ? "alert" : ""}">${getLabel("statuses", a.status)}</span>
+                ${a.leaveType ? `<span class="pill alert">${getLabel("leaveTypes", a.leaveType)}</span>` : ""}
+                <span class="pill">${a.source === "default" ? "固定配置" : "異動覆蓋"}</span>
+              </div>
+              <p class="muted" style="margin:0;">路線：${route ? route.name : "未指定"} ｜ 備註：${a.note || "無"}</p>
+            </div>
+            <div style="display:flex;gap:6px;flex-shrink:0;">
+              <button type="button" class="secondary editSingleButton" data-asg-id="${a.id}">編輯</button>
+              <button type="button" class="warn deleteSingleButton" data-asg-id="${a.id}">刪除</button>
+            </div>
+          </div>
+        </div>`;
+    }).join("");
+
+    const batchHtml = !isSingle ? `
+      <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap;">
+        <button type="button" class="warn" id="batchDeleteButton">批量刪除以上 ${matches.length} 筆排班</button>
+      </div>` : "";
+
+    resultArea.innerHTML = `
+      <div style="margin-top:12px;">
+        <p style="margin:0 0 4px;font-weight:700;">${emp?.name || empId}　${formatDate(startDate)} ~ ${formatDate(endDate)}　共 ${matches.length} 筆</p>
+        ${listHtml}
+        ${batchHtml}
+      </div>`;
+
+    resultArea.querySelectorAll(".editSingleButton").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const asgId = btn.dataset.asgId;
+        const asg = state.assignments.find((a) => a.id === asgId);
+        if (!asg) { window.alert("找不到此筆排班。"); return; }
+        const asgRoute = getRouteById(asg.routeId);
+
+        const editArea = document.createElement("div");
+        editArea.className = "card panel";
+        editArea.style.marginTop = "10px";
+        editArea.innerHTML = `
+          <p class="stat-label" style="margin-bottom:8px;">編輯 ${emp?.name || asg.employeeId} ${formatDate(asg.date)}</p>
+          <form class="form-grid editSingleForm">
+            <input name="assignmentId" type="hidden" value="${asg.id}">
+            <label>狀態<select name="status">${Object.entries(state.labelSettings.statuses).map(([k, v]) => `<option value="${k}" ${asg.status === k ? "selected" : ""}>${v}</option>`).join("")}</select></label>
+            <label>假別<select name="leaveType">${Object.entries(state.labelSettings.leaveTypes).map(([k, v]) => `<option value="${k}" ${asg.leaveType === k ? "selected" : ""}>${v}</option>`).join("")}<option value="" ${!asg.leaveType ? "selected" : ""}>無</option></select></label>
+            <label>班別<select name="shift">${Object.entries(state.labelSettings.shifts).map(([k, v]) => `<option value="${k}" ${asg.shift === k ? "selected" : ""}>${v}</option>`).join("")}</select></label>
+            <label>路線<select name="routeId">${state.routes.map((r) => `<option value="${r.id}" ${asg.routeId === r.id ? "selected" : ""}>${r.name}</option>`).join("")}</select></label>
+            <label>備註<textarea name="note">${asg.note || ""}</textarea></label>
+            <button type="submit">儲存修改</button>
+          </form>`;
+
+        const cardEl = btn.closest("[data-asg-id]");
+        const existingEdit = cardEl.nextElementSibling;
+        if (existingEdit && existingEdit.classList.contains("panel")) existingEdit.remove();
+        cardEl.after(editArea);
+
+        editArea.querySelector(".editSingleForm").addEventListener("submit", (event) => {
+          event.preventDefault();
+          const fd = new FormData(event.currentTarget);
+          const target = state.assignments.find((a) => a.id === fd.get("assignmentId"));
+          if (!target) { window.alert("找不到此筆排班。"); return; }
+          target.status = fd.get("status");
+          target.leaveType = fd.get("status") === "leave" ? fd.get("leaveType") : "";
+          target.shift = fd.get("shift");
+          target.routeId = fd.get("routeId");
+          target.note = (fd.get("note") || "").trim();
+          target.source = "override";
+          logAction({
+            actorId: currentUser.id,
+            action: "assignment-edit",
+            targetType: "assignment",
+            targetId: target.id,
+            summary: `編輯排班 ${emp?.name || target.employeeId} ${target.date}`,
+            detail: describeAssignment(target),
+          });
+          saveState();
+          window.alert("排班已更新。");
+          render();
+        });
+      });
+    });
+
+    resultArea.querySelectorAll(".deleteSingleButton").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const asgId = btn.dataset.asgId;
+        const asg = state.assignments.find((a) => a.id === asgId);
+        if (!asg) return;
+        const confirmed = window.confirm(`確定要刪除 ${emp?.name || empId} 在 ${formatDate(asg.date)} 的排班嗎？\n\n刪除後該員工當天將回到固定配置（若有），或變成無排班。`);
+        if (!confirmed) return;
+        state.assignments = state.assignments.filter((a) => a.id !== asgId);
+        logAction({
+          actorId: currentUser.id,
+          action: "assignment-delete",
+          targetType: "assignment",
+          targetId: asgId,
+          summary: `刪除排班 ${emp?.name || empId} ${asg.date}`,
+          detail: `已移除該筆排班記錄。`,
+        });
+        saveState();
+        window.alert("排班已刪除。");
+        render();
+      });
+    });
+
+    const batchBtn = resultArea.querySelector("#batchDeleteButton");
+    if (batchBtn) {
+      batchBtn.addEventListener("click", () => {
+        const ids = matches.map((item) => item.assignment.id);
+        const confirmed = window.confirm(`確定要批量刪除 ${emp?.name || empId} 在 ${formatDate(startDate)} ~ ${formatDate(endDate)} 的 ${ids.length} 筆排班嗎？\n\n刪除後這些天將回到固定配置（若有），或變成無排班。`);
+        if (!confirmed) return;
+        const idSet = new Set(ids);
+        state.assignments = state.assignments.filter((a) => !idSet.has(a.id));
+        logAction({
+          actorId: currentUser.id,
+          action: "assignment-batch-delete",
+          targetType: "assignment",
+          targetId: empId,
+          summary: `批量刪除 ${emp?.name || empId} ${startDate} ~ ${endDate} 共 ${ids.length} 筆排班`,
+          detail: `已移除 ${ids.length} 筆排班記錄。`,
+        });
+        saveState();
+        window.alert(`已批量刪除 ${ids.length} 筆排班。`);
+        render();
+      });
+    }
+  });
+
+  defaultForm.querySelector("#defaultScheduleFormV2").addEventListener("submit", (event) => {
+    event.preventDefault();
+    const changed = generateDefaultAssignments(new FormData(event.currentTarget), currentUser);
+    if (changed) render();
+  });
+  defaultForm.querySelector("#fillNextMonthButton").addEventListener("click", () => {
+    applyNextMonthRange(defaultForm.querySelector("#defaultScheduleFormV2"));
+  });
+
+  leaveForm.querySelector("#leaveOnlyForm").addEventListener("submit", (event) => {
+    event.preventDefault();
+    const changed = applyLeaveOnly(new FormData(event.currentTarget), currentUser);
+    if (changed) render();
+  });
+
+  reliefForm.querySelector("#reliefOnlyForm").addEventListener("submit", (event) => {
+    event.preventDefault();
+    const changed = applyReliefOnly(new FormData(event.currentTarget), currentUser);
+    if (changed) render();
+  });
+
+  return section;
+}
+function openDailyBoardWindow() {
+  const popup = window.open("", "daily-board-window", "width=1180,height=820,scrollbars=yes,resizable=yes");
+  if (!popup) {
+    window.alert("請先允許瀏覽器開啟彈出視窗，才能查看今日全體班表。");
+    return;
+  }
+
+  const rows = getAssignmentsByDate(getToday()).map((assignment) => {
+    const employee = getEmployeeById(assignment.employeeId);
+    const route = getRouteById(assignment.routeId);
+    const defaultRoute = getDefaultRoute(employee);
+    return `
+      <tr>
+        <td>${employee ? employee.name : assignment.employeeId}</td>
+        <td>${roleLabels[employee?.role] || "-"}</td>
+        <td>${defaultRoute ? defaultRoute.name : "未指定路線"}</td>
+        <td>${route ? route.name : "-"}</td>
+        <td>${route ? `${route.approvedMileage} 公里` : "-"}</td>
+        <td>${getLabel("statuses", assignment.status)}</td>
+        <td>${assignment.source === "default" ? "固定配置" : "異動覆蓋"}</td>
+        <td>${assignment.note || "-"}</td>
+      </tr>
+    `;
+  }).join("");
+
+  popup.document.open();
+  popup.document.write(`
+    <!DOCTYPE html>
+    <html lang="zh-Hant">
+    <head>
+      <meta charset="UTF-8">
+      <title>今日全體班表</title>
+      <style>
+        body { font-family: "Segoe UI", "Noto Sans TC", sans-serif; margin: 0; padding: 24px; background: #f6f1e8; color: #2f2418; }
+        h1 { margin: 0 0 8px; }
+        p { margin: 0 0 18px; color: #6f6254; }
+        .meta { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 18px; }
+        .meta span { background: #fff8ef; border: 1px solid #ead8c2; border-radius: 999px; padding: 8px 12px; font-weight: 600; }
+        table { width: 100%; border-collapse: collapse; background: #fffdf9; }
+        th, td { border-bottom: 1px solid #eadfd0; padding: 10px 12px; text-align: left; vertical-align: top; }
+        th { background: #f1e3d1; }
+      </style>
+    </head>
+    <body>
+      <h1>今日全體班表</h1>
+      <p>${getToday()} 的全體排班與異動資訊</p>
+      <div class="meta">
+        <span>總筆數 ${getAssignmentsByDate(getToday()).length}</span>
+        <span>異動覆蓋 ${getAssignmentsByDate(getToday()).filter((assignment) => assignment.source === "override").length}</span>
+        <span>請假 ${getAssignmentsByDate(getToday()).filter((assignment) => assignment.status === "leave").length}</span>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>員工</th>
+            <th>角色</th>
+            <th>固定配置</th>
+            <th>今日路線</th>
+            <th>核定里程</th>
+            <th>狀態</th>
+            <th>來源</th>
+            <th>備註</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </body>
+    </html>
+  `);
+  popup.document.close();
+  popup.focus();
+}
+function openLeaveSummaryWindow(startDate, endDate) {
+  const allDates = enumerateDates(startDate, endDate).filter((d) => !isHoliday(d));
+  const leaveAssignments = state.assignments
+    .filter((a) => a.date >= startDate && a.date <= endDate && a.status === "leave")
+    .sort((a, b) => a.date.localeCompare(b.date) || (getEmployeeById(a.employeeId)?.name || "").localeCompare(getEmployeeById(b.employeeId)?.name || "", "zh-Hant"));
+
+  const popup = window.open("", `leave-summary-${startDate}-${endDate}`, "width=1200,height=850,scrollbars=yes,resizable=yes");
+  if (!popup) {
+    window.alert("請先允許瀏覽器開啟彈出視窗。");
+    return;
+  }
+
+  const dateGroups = new Map();
+  leaveAssignments.forEach((a) => {
+    if (!dateGroups.has(a.date)) dateGroups.set(a.date, []);
+    dateGroups.get(a.date).push(a);
+  });
+
+  const uniqueEmployees = new Set(leaveAssignments.map((a) => a.employeeId));
+
+  let detailRows = "";
+  for (const [date, assignments] of dateGroups) {
+    assignments.forEach((a, idx) => {
+      const emp = getEmployeeById(a.employeeId);
+      detailRows += `
+        <tr${idx === 0 ? ' class="date-first"' : ""}>
+          ${idx === 0 ? `<td rowspan="${assignments.length}" class="date-cell">${formatDate(date)}</td>` : ""}
+          <td>${emp ? emp.name : a.employeeId}</td>
+          <td><strong>${getLabel("leaveTypes", a.leaveType)}</strong></td>
+          <td>${a.note || "-"}</td>
+        </tr>
+      `;
+    });
+  }
+
+  if (!leaveAssignments.length) {
+    detailRows = `<tr><td colspan="4" style="text-align:center;padding:24px;color:#6f6254;">此區間沒有休假記錄。</td></tr>`;
+  }
+
+  popup.document.open();
+  popup.document.write(`
+    <!DOCTYPE html>
+    <html lang="zh-Hant">
+    <head>
+      <meta charset="UTF-8">
+      <title>休假總表 ${startDate} ~ ${endDate}</title>
+      <style>
+        body { font-family: "Segoe UI", "Noto Sans TC", sans-serif; margin: 0; padding: 24px; background: #f6f1e8; color: #2f2418; }
+        h1 { margin: 0 0 8px; }
+        p { margin: 0 0 18px; color: #6f6254; }
+        .meta { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 18px; }
+        .meta span { background: #fff8ef; border: 1px solid #ead8c2; border-radius: 999px; padding: 8px 12px; font-weight: 600; }
+        .meta span.alert { background: #fff0e8; border-color: #f0c4a8; color: #a0401a; }
+        table { width: 100%; border-collapse: collapse; background: #fffdf9; }
+        th, td { border-bottom: 1px solid #eadfd0; padding: 10px 12px; text-align: left; vertical-align: top; }
+        th { background: #f1e3d1; white-space: nowrap; }
+        .date-cell { background: #fff8ef; font-weight: 700; white-space: nowrap; }
+        .date-first td { border-top: 2px solid #d9c8b0; }
+        @media print {
+          body { padding: 8px; background: #fff; }
+          .meta span { padding: 4px 8px; font-size: 11px; }
+          th, td { padding: 6px 8px; }
+        }
+      </style>
+    </head>
+    <body>
+      <h1>休假總表</h1>
+      <p>${startDate} 至 ${endDate}，僅顯示工作日的休假記錄，方便行政開立假單。</p>
+      <div class="meta">
+        <span class="alert">休假總人次 ${leaveAssignments.length}</span>
+        <span>涉及員工 ${uniqueEmployees.size} 人</span>
+        <span>涵蓋工作日 ${allDates.length} 天</span>
+        <span>有休假的天數 ${dateGroups.size} 天</span>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>日期</th>
+            <th>員工</th>
+            <th>假別</th>
+            <th>備註</th>
+          </tr>
+        </thead>
+        <tbody>${detailRows}</tbody>
+      </table>
+    </body>
+    </html>
+  `);
+  popup.document.close();
+  popup.focus();
+}
+
+function openRangeBoardWindow(startDate, endDate) {
+  const allDates = enumerateDates(startDate, endDate);
+  const popup = window.open("", `range-board-${startDate}-${endDate}`, "width=1600,height=900,scrollbars=yes,resizable=yes");
+  if (!popup) {
+    window.alert("請先允許瀏覽器開啟彈出視窗，才能查看班表。");
+    return;
+  }
+
+  const activeEmployees = state.employees
+    .filter((employee) => employee.employmentStatus === "active")
+    .sort(compareEmployeesByScheduleOrder);
+
+  const holidayDates = allDates.filter((dateString) => isHoliday(dateString));
+  const visibleDates = allDates.filter((dateString) => !isHoliday(dateString));
+
+  const headerCells = visibleDates.map((dateString) => {
+    const date = new Date(`${dateString}T00:00:00`);
+    const weekday = ["\u65e5", "\u4e00", "\u4e8c", "\u4e09", "\u56db", "\u4e94", "\u516d"][date.getDay()];
+    const m = date.getMonth() + 1;
+    const d = date.getDate();
+    return `<th>${m}/${d}<small>(${weekday})</small></th>`;
+  }).join("");
+
+  const rows = activeEmployees.map((employee) => {
+    const defaultRoute = getDefaultRoute(employee);
+    let hasOverride = false;
+    const cells = visibleDates.map((dateString) => {
+      const assignment = getDisplayAssignment(employee, dateString);
+      const route = assignment ? getRouteById(assignment.routeId) : null;
+      const status = assignment ? getLabel("statuses", assignment.status) : "-";
+      const leaveType = assignment?.leaveType ? getLabel("leaveTypes", assignment.leaveType) : "";
+      const sourceLabel = assignment?.source === "override" ? "\u7570\u52d5" : assignment ? "\u56fa\u5b9a" : "";
+      if (assignment?.source === "override") hasOverride = true;
+      const cellClass = [assignment?.source === "override" ? "override-cell" : ""].filter(Boolean).join(" ");
+      const routeText = assignment?.status === "leave"
+        ? (leaveType || "\u4f11\u5047")
+        : (route ? route.name : (defaultRoute ? defaultRoute.name : "-"));
+      const secondaryText = assignment?.status === "leave"
+        ? (leaveType ? `${leaveType} / \u4f11\u5047` : "\u4f11\u5047")
+        : status;
+      return `
+        <td class="${cellClass}">
+          <div class="month-route">${routeText}</div>
+          <div class="month-meta">${secondaryText}${sourceLabel ? ` / ${sourceLabel}` : ""}</div>
+        </td>
+      `;
+    }).join("");
+    return `
+      <tr data-has-override="${hasOverride}">
+        <th class="sticky-name">
+          <div>${employee.name}</div>
+          <small>${roleLabels[employee.role] || "-"}</small>
+        </th>
+        ${cells}
+      </tr>
+    `;
+  }).join("");
+
+  const overrideCount = activeEmployees.filter((emp) => {
+    return visibleDates.some((d) => {
+      const a = getDisplayAssignment(emp, d);
+      return a?.source === "override";
+    });
+  }).length;
+
+  popup.document.open();
+  popup.document.write(`
+    <!DOCTYPE html>
+    <html lang="zh-Hant">
+    <head>
+      <meta charset="UTF-8">
+      <title>\u73ed\u8868 ${startDate} ~ ${endDate}</title>
+      <style>
+        body { font-family: "Segoe UI", "Noto Sans TC", sans-serif; margin: 0; padding: 24px; background: #f6f1e8; color: #2f2418; }
+        h1 { margin: 0 0 8px; }
+        p { margin: 0 0 18px; color: #6f6254; }
+        .meta { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+        .meta span { background: #fff8ef; border: 1px solid #ead8c2; border-radius: 999px; padding: 8px 12px; font-weight: 600; }
+        .filter-bar { margin-bottom: 18px; }
+        .filter-bar label { cursor: pointer; font-weight: 600; user-select: none; }
+        .filter-bar input { margin-right: 6px; transform: scale(1.2); }
+        .board-wrap { overflow: auto; border: 1px solid #eadfd0; background: #fffdf9; }
+        table { border-collapse: collapse; width: 100%; table-layout: fixed; }
+        th, td { border-bottom: 1px solid #eadfd0; border-right: 1px solid #f0e5d7; padding: 6px 6px; text-align: left; vertical-align: top; }
+        thead th { position: sticky; top: 0; background: #f1e3d1; z-index: 2; min-width: 70px; font-size: 12px; }
+        thead th small { display: block; color: #6f6254; margin-top: 4px; }
+        .sticky-name { position: sticky; left: 0; background: #fff8ef; z-index: 1; min-width: 90px; width: 90px; }
+        .sticky-name small { display: block; color: #6f6254; margin-top: 4px; }
+        .override-cell { background: #fff0e8; }
+        .month-route { font-weight: 700; margin-bottom: 2px; font-size: 12px; line-height: 1.25; word-break: break-word; }
+        .month-meta { color: #6f6254; font-size: 11px; line-height: 1.25; word-break: break-word; }
+        tr.hidden-row { display: none; }
+        @media print {
+          body { padding: 8px; background: #fff; }
+          .meta { margin-bottom: 8px; }
+          .meta span { padding: 4px 8px; font-size: 11px; }
+          .filter-bar { display: none; }
+          th, td { padding: 4px 4px; }
+          .month-route { font-size: 10px; }
+          .month-meta { font-size: 9px; }
+          tr.hidden-row { display: none; }
+        }
+      </style>
+    </head>
+    <body>
+      <h1>\u73ed\u8868 ${startDate} ~ ${endDate}</h1>
+      <p>\u5df2\u81ea\u52d5\u96b1\u85cf\u9031\u672b\u8207\u516c\u53f8\u4f11\u5047\u65e5\u6b04\u4f4d\uff0c\u6bcf\u683c\u986f\u793a\u8def\u7dda\u3001\u72c0\u614b\u3001\u5047\u5225\u3002</p>
+      <div class="meta">
+        <span>\u54e1\u5de5 ${activeEmployees.length} \u4eba</span>
+        <span>\u986f\u793a\u5de5\u4f5c\u65e5 ${visibleDates.length} \u5929</span>
+        <span>\u96b1\u85cf\u5047\u65e5 ${holidayDates.length} \u5929</span>
+        <span>\u6709\u7570\u52d5\u54e1\u5de5 ${overrideCount} \u4eba</span>
+      </div>
+      <div class="filter-bar">
+        <label><input type="checkbox" id="filterOverrideOnly">\u53ea\u986f\u793a\u6709\u7570\u52d5\uff08\u4f11\u5047/\u4ee3\u73ed/\u652f\u63f4\uff09\u7684\u54e1\u5de5</label>
+      </div>
+      <div class="board-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th class="sticky-name">\u54e1\u5de5</th>
+              ${headerCells}
+            </tr>
+          </thead>
+          <tbody id="boardBody">${rows}</tbody>
+        </table>
+      </div>
+      <script>
+        document.getElementById("filterOverrideOnly").addEventListener("change", function() {
+          var rows = document.querySelectorAll("#boardBody tr");
+          for (var i = 0; i < rows.length; i++) {
+            if (this.checked && rows[i].getAttribute("data-has-override") === "false") {
+              rows[i].classList.add("hidden-row");
+            } else {
+              rows[i].classList.remove("hidden-row");
+            }
+          }
+        });
+      </script>
+    </body>
+    </html>
+  `);
+  popup.document.close();
+  popup.focus();
+}
+function generateDefaultAssignments(formData, currentUser) {
+  const payload = Object.fromEntries(formData.entries());
+  if (payload.startDate > payload.endDate) {
+    window.alert("結束日期不可早於開始日期。");
+    return false;
+  }
+
+  const targetEmployees = payload.employeeId
+    ? state.employees.filter((employee) => employee.id === payload.employeeId && employee.defaultRouteId)
+    : state.employees.filter((employee) => employee.defaultRouteId);
+
+  if (!targetEmployees.length) {
+    window.alert("沒有可生成固定班表的人員。");
+    return false;
+  }
+
+  const dates = getWorkingDates(payload.startDate, payload.endDate, state.companySettings);
+  let created = 0;
+  let updated = 0;
+  let preservedOverrides = 0;
+
+  dates.forEach((dateString) => {
+    targetEmployees.forEach((employee) => {
+      const existing = getAssignmentByEmployeeDate(employee.id, dateString);
+      if (existing?.source === "override") {
+        preservedOverrides += 1;
+        return;
+      }
+      if (existing) {
+        existing.routeId = employee.defaultRouteId;
+        existing.shift = employee.shift;
+        existing.status = "working";
+        existing.leaveType = "";
+        existing.note = "";
+        existing.source = "default";
+        updated += 1;
+      } else {
+        state.assignments.push({
+          id: makeId("asg"),
+          date: dateString,
+          employeeId: employee.id,
+          routeId: employee.defaultRouteId,
+          shift: employee.shift,
+          status: "working",
+          leaveType: "",
+          note: "",
+          source: "default",
+        });
+        created += 1;
+      }
+    });
+  });
+
+  logAction({
+    actorId: currentUser.id,
+    action: "default-generate",
+    targetType: "assignment",
+    targetId: payload.employeeId || "all",
+    summary: `生成固定班表 ${payload.startDate} 至 ${payload.endDate}`,
+    detail: `新增 ${created} 筆 / 更新 ${updated} 筆 / 保留異動覆蓋 ${preservedOverrides} 筆`,
+  });
+
+  state.session.lastGeneratedRange = { startDate: payload.startDate, endDate: payload.endDate };
+  saveState();
+  window.alert(`固定班表已生成。\n新增 ${created} 筆\n更新 ${updated} 筆\n保留異動覆蓋 ${preservedOverrides} 筆`);
+  return true;
+}
+function applyNextMonthRange(formEl) {
+  const nextMonth = getMonthRange(getToday(), 1);
+  formEl.elements.startDate.value = nextMonth.startDate;
+  formEl.elements.endDate.value = nextMonth.endDate;
+  window.alert(`已帶入次月日期區間：${nextMonth.startDate} 至 ${nextMonth.endDate}`);
+}
+
+function upsertAssignmentFromForm(formData, currentUser) {
+  const payload = Object.fromEntries(formData.entries());
+  const route = getRouteById(payload.routeId);
+  const employee = getEmployeeById(payload.employeeId);
+  if (!route || !employee) return false;
+
+  const routeConflict = state.assignments.find((assignment) =>
+    assignment.date === payload.date &&
+    assignment.routeId === payload.routeId &&
+    assignment.employeeId !== payload.employeeId &&
+    assignment.status !== "leave"
+  );
+
+  if (routeConflict) {
+    const conflictEmployee = getEmployeeById(routeConflict.employeeId);
+    const confirmed = window.confirm(
+      `${payload.date} 的 ${route?.name || "未指定路線"} 已排給 ${conflictEmployee?.name || routeConflict.employeeId}\n` +
+      `既有排班：${describeAssignment(routeConflict)}\n\n是否仍要保留重複路線排班？`
+    );
+    if (!confirmed) return false;
+  }
+
+  const existing = getAssignmentByEmployeeDate(payload.employeeId, payload.date);
+  const shift = payload.shift || inferShift(route.name);
+  if (existing) {
+    existing.routeId = payload.routeId;
+    existing.shift = shift;
+    existing.status = payload.status;
+    existing.leaveType = payload.status === "leave" ? payload.leaveType : "";
+    existing.note = (payload.note || "").trim();
+    existing.source = "override";
+    logAction({
+      actorId: currentUser.id,
+      action: "assignment-update",
+      targetType: "assignment",
+      targetId: existing.id,
+      summary: `更新排班 ${employee.name} ${payload.date}`,
+      detail: describeAssignment(existing),
+    });
+  } else {
+    const assignment = {
+      id: makeId("asg"),
+      date: payload.date,
+      employeeId: payload.employeeId,
+      routeId: payload.routeId,
+      shift,
+      status: payload.status,
+      leaveType: payload.status === "leave" ? payload.leaveType : "",
+      note: (payload.note || "").trim(),
+      source: "override",
+    };
+    state.assignments.push(assignment);
+    logAction({
+      actorId: currentUser.id,
+      action: "assignment-create",
+      targetType: "assignment",
+      targetId: assignment.id,
+      summary: `新增排班 ${employee.name} ${payload.date}`,
+      detail: describeAssignment(assignment),
+    });
+  }
+
+  saveState();
+  return true;
+}
+function applyLeaveOnly(formData, currentUser) {
+  const payload = Object.fromEntries(formData.entries());
+  const employee = getEmployeeById(payload.employeeId);
+  if (!employee) return false;
+
+  const defaultRoute = getDefaultRoute(employee);
+  const startDate = payload.startDate;
+  const endDate = payload.endDate;
+  if (!startDate || !endDate) {
+    window.alert("請選擇開始與結束日期。");
+    return false;
+  }
+  if (startDate > endDate) {
+    window.alert("結束日期不可早於開始日期。");
+    return false;
+  }
+
+  const leaveRouteId = defaultRoute ? defaultRoute.id : "";
+  const shift = defaultRoute ? employee.shift : "day";
+  const note = (payload.note || "").trim();
+  const dates = enumerateDates(startDate, endDate);
+  let processed = 0;
+  let skippedHoliday = 0;
+
+  dates.forEach((dateString) => {
+    if (isHoliday(dateString)) {
+      skippedHoliday += 1;
+      return;
+    }
+
+    let leaveAssignment = getAssignmentByEmployeeDate(employee.id, dateString);
+    if (!leaveAssignment) {
+      leaveAssignment = {
+        id: makeId("asg"),
+        date: dateString,
+        employeeId: employee.id,
+        routeId: leaveRouteId,
+        shift,
+        status: "leave",
+        leaveType: payload.leaveType,
+        note,
+        source: "override",
+      };
+      state.assignments.push(leaveAssignment);
+    } else {
+      leaveAssignment.routeId = leaveRouteId;
+      leaveAssignment.shift = shift;
+      leaveAssignment.status = "leave";
+      leaveAssignment.leaveType = payload.leaveType;
+      leaveAssignment.note = note;
+      leaveAssignment.source = "override";
+    }
+
+    processed += 1;
+  });
+
+  if (!processed) {
+    window.alert("選擇區間都落在週末或公司休假日，沒有可套用的工作日。");
+    return false;
+  }
+
+  logAction({
+    actorId: currentUser.id,
+    action: "leave",
+    targetType: "assignment",
+    targetId: employee.id,
+    summary: `${employee.name} ${startDate} 至 ${endDate} 登記 ${getLabel("leaveTypes", payload.leaveType)}`,
+    detail: `套用 ${processed} 天${skippedHoliday ? `，略過假日 ${skippedHoliday} 天` : ""}。`,
+  });
+
+  saveState();
+  window.alert(`請假已儲存。\n套用工作日 ${processed} 天${skippedHoliday ? `\n略過假日 ${skippedHoliday} 天` : ""}`);
+  return true;
+}
+
+function applyReliefOnly(formData, currentUser) {
+  const payload = Object.fromEntries(formData.entries());
+  const originalEmployee = getEmployeeById(payload.originalEmployeeId);
+  const reliefEmployee = getEmployeeById(payload.reliefEmployeeId);
+  if (!originalEmployee) { window.alert("請選擇被代班員工。"); return false; }
+  if (!reliefEmployee) { window.alert("請選擇代班人員。"); return false; }
+
+  if (originalEmployee.id === reliefEmployee.id) {
+    window.alert("被代班員工與代班人員不能是同一人。");
+    return false;
+  }
+
+  const startDate = payload.startDate;
+  const endDate = payload.endDate;
+  if (!startDate || !endDate) {
+    window.alert("請選擇開始與結束日期。");
+    return false;
+  }
+  if (startDate > endDate) {
+    window.alert("結束日期不可早於開始日期。");
+    return false;
+  }
+
+  const route = payload.routeId ? getRouteById(payload.routeId) : null;
+  const defaultRoute = getDefaultRoute(originalEmployee);
+  const reliefRouteId = route ? route.id : (defaultRoute ? defaultRoute.id : "");
+  const shift = route ? inferShift(route.name) : (defaultRoute ? originalEmployee.shift : "day");
+  const note = (payload.note || "").trim() || `${originalEmployee.name} 休假代班`;
+  const dates = enumerateDates(startDate, endDate);
+  let processed = 0;
+  let skippedHoliday = 0;
+
+  dates.forEach((dateString) => {
+    if (isHoliday(dateString)) {
+      skippedHoliday += 1;
+      return;
+    }
+
+    const reliefExisting = getAssignmentByEmployeeDate(reliefEmployee.id, dateString);
+    if (reliefExisting) {
+      reliefExisting.routeId = reliefRouteId;
+      reliefExisting.shift = shift;
+      reliefExisting.status = "reassigned";
+      reliefExisting.leaveType = "";
+      reliefExisting.note = note;
+      reliefExisting.source = "override";
+    } else {
+      state.assignments.push({
+        id: makeId("asg"),
+        date: dateString,
+        employeeId: reliefEmployee.id,
+        routeId: reliefRouteId,
+        shift,
+        status: "reassigned",
+        leaveType: "",
+        note,
+        source: "override",
+      });
+    }
+
+    processed += 1;
+  });
+
+  if (!processed) {
+    window.alert("選擇區間都落在週末或公司休假日，沒有可套用的工作日。");
+    return false;
+  }
+
+  logAction({
+    actorId: currentUser.id,
+    action: "relief",
+    targetType: "assignment",
+    targetId: reliefEmployee.id,
+    summary: `${reliefEmployee.name} 代班 ${originalEmployee.name}，${startDate} 至 ${endDate}`,
+    detail: `${route ? `路線 ${route.name}，核定里程 ${route.approvedMileage} 公里` : `沿用 ${originalEmployee.name} 固定路線`}。套用 ${processed} 天${skippedHoliday ? `，略過假日 ${skippedHoliday} 天` : ""}。`,
+  });
+
+  saveState();
+  window.alert(`代班已儲存。\n${reliefEmployee.name} 代班 ${originalEmployee.name}\n套用工作日 ${processed} 天${skippedHoliday ? `\n略過假日 ${skippedHoliday} 天` : ""}`);
+  return true;
+}
+
+function renderMasterDataPanel(currentUser) {
+  const section = createSection("基本資料與休假日", "行政與主管可維護公司休假日與顯示名稱。");
+  const grid = document.createElement("div");
+  grid.className = "panel-grid master-grid";
+
+  const holidayPanel = document.createElement("div");
+  holidayPanel.className = "card panel holiday-settings master-card";
+  holidayPanel.innerHTML = `
+    <div class="section-heading">
+      <div>
+        <h3>休假日設定</h3>
+        <p class="muted">週六、週日固定休假；可維護公司加休或補休日期。</p>
+      </div>
+    </div>
+    <div class="notice">目前公司休假日清單（標示「手動」為另外維護）：</div>
+    <div class="inline-list holiday-chip-list">${renderCompanyHolidayList()}</div>
+    <form id="holidayForm" class="form-grid holiday-form-grid">
+      <label>公司休假日（每行一個日期）
+        <textarea class="holiday-textarea" name="holidays" rows="8" placeholder="例如：2026-04-04">${state.companySettings.holidays.join("\n")}</textarea>
+      </label>
+      <button type="submit" class="holiday-save-button">儲存休假日</button>
+    </form>
+  `;
+
+  const labelsPanel = document.createElement("div");
+  labelsPanel.className = "card panel master-card";
+  labelsPanel.innerHTML = `
+    <div class="section-heading">
+      <div>
+        <h3>名稱設定</h3>
+        <p class="muted">可調整班別、假別、狀態顯示名稱。</p>
+      </div>
+    </div>
+    <form id="labelsForm" class="mini-grid">
+      ${renderLabelInputs()}
+      <button type="submit">儲存名稱設定</button>
+    </form>
+  `;
+
+  const employeePanel = document.createElement("div");
+  employeePanel.className = "card panel master-card";
+  employeePanel.innerHTML = `
+    <div class="section-heading">
+      <div>
+        <h3>員工維護</h3>
+        <p class="muted">可新增或編輯員工、角色、固定路線與可支援代班。</p>
+      </div>
+    </div>
+    <form id="employeeForm" class="form-grid">
+      <input name="employeeId" type="hidden">
+      <label>選擇既有員工
+        <select name="existingEmployeeId">
+          <option value="">新增員工</option>
+          ${[...state.employees].sort(compareEmployeesByScheduleOrder).map((employee) => `<option value="${employee.id}">${employee.name}</option>`).join("")}
+        </select>
+      </label>
+      <div class="action-row">
+        <button type="button" class="secondary" id="loadEmployeeButton">載入</button>
+        <button type="button" class="ghost" id="resetEmployeeButton">清空</button>
+      </div>
+      <label>姓名<input name="name" required></label>
+      <label>角色<select name="role">${Object.entries(roleLabels).map(([key, label]) => `<option value="${key}">${label}</option>`).join("")}</select></label>
+      <label>班別<select name="shift">${labelOptions("shifts")}</select></label>
+      <label>固定路線<select name="defaultRouteId"><option value="">未指定路線</option>${routeOptions()}</select></label>
+      <label>是否備員<select name="isRelief"><option value="false">否</option><option value="true">是</option></select></label>
+      <label>可支援代班<select name="canCoverShift"><option value="false">否</option><option value="true">是</option></select></label>
+      <label>在職狀態
+        <select name="employmentStatus">
+          <option value="active">在職</option>
+          <option value="resigned">已離職</option>
+          <option value="unpaidLeave">留職停薪</option>
+        </select>
+      </label>
+      <label>支援路線（可多選）<select name="supportLineIds" multiple>${state.routes.map((route) => `<option value="${route.id}">${route.name}</option>`).join("")}</select></label>
+      <button type="submit">儲存員工</button>
+    </form>
+  `;
+
+  const routePanel = document.createElement("div");
+  routePanel.className = "card panel master-card";
+  routePanel.innerHTML = `
+    <div class="section-heading">
+      <div>
+        <h3>路線維護</h3>
+        <p class="muted">可新增或編輯路線名稱、類型與核定里程。</p>
+      </div>
+    </div>
+    <form id="routeForm" class="form-grid">
+      <input name="routeId" type="hidden">
+      <label>選擇既有路線
+        <select name="existingRouteId">
+          <option value="">新增路線</option>
+          ${state.routes.sort((a, b) => a.name.localeCompare(b.name, "zh-Hant")).map((route) => `<option value="${route.id}">${route.name}</option>`).join("")}
+        </select>
+      </label>
+      <div class="action-row">
+        <button type="button" class="secondary" id="loadRouteButton">載入</button>
+        <button type="button" class="ghost" id="resetRouteButton">清空</button>
+      </div>
+      <label>路線名稱<input name="name" required></label>
+      <label>路線類型<select name="type">${Object.entries(routeTypeLabels).map(([key, label]) => `<option value="${key}">${label}</option>`).join("")}</select></label>
+      <label>核定里程<input name="approvedMileage" type="number" min="0" step="1" required></label>
+      <button type="submit">儲存路線</button>
+    </form>
+  `;
+
+  const pinPanel = document.createElement("div");
+  if (currentUser.role === "supervisor") {
+    pinPanel.className = "card panel master-card";
+    pinPanel.innerHTML = `
+      <div class="section-heading">
+        <div>
+          <h3>PIN 碼管理</h3>
+          <p class="muted">可修改各管理角色的登入 PIN 碼。頁面重新載入後需重新驗證。</p>
+        </div>
+      </div>
+      <form id="pinForm" class="form-grid">
+        <label>組長 PIN<input name="teamLeader" type="password" value="${state.pinSettings.teamLeader}" maxlength="8" required></label>
+        <label>行政 PIN<input name="adminStaff" type="password" value="${state.pinSettings.adminStaff}" maxlength="8" required></label>
+        <label>主管 PIN<input name="supervisor" type="password" value="${state.pinSettings.supervisor}" maxlength="8" required></label>
+        <button type="submit">儲存 PIN 碼</button>
+      </form>
+    `;
+  }
+
+  const panels = [holidayPanel, labelsPanel, employeePanel, routePanel];
+  if (currentUser.role === "supervisor") panels.push(pinPanel);
+  grid.append(...panels);
+  section.appendChild(grid);
+
+  const employeeForm = employeePanel.querySelector("#employeeForm");
+  employeeForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    createEmployee(new FormData(event.currentTarget), currentUser);
+    render();
+  });
+  employeePanel.querySelector("#loadEmployeeButton").addEventListener("click", () => populateEmployeeForm(employeeForm, employeeForm.elements.existingEmployeeId.value));
+  employeePanel.querySelector("#resetEmployeeButton").addEventListener("click", () => {
+    employeeForm.reset();
+    employeeForm.elements.employeeId.value = "";
+  });
+  employeePanel.appendChild(renderEmployeeTable());
+
+  const routeForm = routePanel.querySelector("#routeForm");
+  routeForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    createRoute(new FormData(event.currentTarget), currentUser);
+    render();
+  });
+  routePanel.querySelector("#loadRouteButton").addEventListener("click", () => populateRouteForm(routeForm, routeForm.elements.existingRouteId.value));
+  routePanel.querySelector("#resetRouteButton").addEventListener("click", () => {
+    routeForm.reset();
+    routeForm.elements.routeId.value = "";
+  });
+  routePanel.appendChild(renderRouteTable());
+
+  labelsPanel.querySelector("#labelsForm").addEventListener("submit", (event) => {
+    event.preventDefault();
+    updateLabels(new FormData(event.currentTarget), currentUser);
+    render();
+  });
+
+  holidayPanel.querySelector("#holidayForm").addEventListener("submit", (event) => {
+    event.preventDefault();
+    updateCompanyHolidays(new FormData(event.currentTarget), currentUser);
+    render();
+  });
+
+  if (currentUser.role === "supervisor" && pinPanel.querySelector("#pinForm")) {
+    pinPanel.querySelector("#pinForm").addEventListener("submit", (event) => {
+      event.preventDefault();
+      const fd = new FormData(event.currentTarget);
+      state.pinSettings.teamLeader = fd.get("teamLeader").trim() || "1234";
+      state.pinSettings.adminStaff = fd.get("adminStaff").trim() || "1234";
+      state.pinSettings.supervisor = fd.get("supervisor").trim() || "0000";
+      logAction({
+        actorId: currentUser.id,
+        action: "pin-update",
+        targetType: "settings",
+        targetId: "pin-settings",
+        summary: "更新管理角色 PIN 碼",
+        detail: "已更新組長、行政與主管的 PIN 碼。",
+      });
+      saveState();
+      window.alert("PIN 碼已更新。下次切換角色時將使用新的 PIN 碼。");
+    });
+  }
+
+  return section;
+}
+function renderEmployeeTable() {
+  const wrap = document.createElement("div");
+  wrap.className = "table-card";
+  const rows = [...state.employees]
+    .sort(compareEmployeesByScheduleOrder)
+    .map((employee) => {
+      const defaultRoute = getDefaultRoute(employee);
+      return `
+        <tr>
+          <td>${employee.name}</td>
+          <td>${roleLabels[employee.role]}</td>
+          <td>${defaultRoute ? `${defaultRoute.name} / ${getLabel("shifts", employee.shift)}` : "未指定路線"}</td>
+          <td>${employee.canCoverShift ? "是" : "否"}</td>
+          <td>${employmentStatusLabels[employee.employmentStatus || "active"]}</td>
+        </tr>
+      `;
+    })
+    .join("");
+
+  wrap.innerHTML = `
+    <table>
+      <thead>
+        <tr>
+          <th>姓名</th>
+          <th>角色</th>
+          <th>固定配置</th>
+          <th>可支援代班</th>
+          <th>狀態</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>
+  `;
+
+  return wrap;
+}
+function renderRouteTable() {
+  const wrap = document.createElement("div");
+  wrap.className = "table-card";
+  const rows = state.routes
+    .sort((a, b) => a.name.localeCompare(b.name, "zh-Hant"))
+    .map((route) => {
+      const owner = state.employees.find((employee) => employee.defaultRouteId === route.id);
+      return `
+        <tr>
+          <td>${route.name}</td>
+          <td>${displayRouteType(route.type)}</td>
+          <td>${route.approvedMileage} 公里</td>
+          <td>${owner ? owner.name : "未指定"}</td>
+        </tr>
+      `;
+    })
+    .join("");
+
+  wrap.innerHTML = `
+    <table>
+      <thead>
+        <tr>
+          <th>路線名稱</th>
+          <th>類型</th>
+          <th>核定里程</th>
+          <th>固定人員</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>
+  `;
+
+  return wrap;
+}
+function renderLabelInputs() {
+  const groups = [["shifts", "班別名稱"], ["leaveTypes", "假別名稱"], ["statuses", "狀態名稱"]];
+  const keyLabels = {
+    shifts: { day: "白班", evening: "晚班", night: "大夜班" },
+    leaveTypes: { annual: "特休", personal: "事假", sick: "病假", official: "公假", injury: "公傷", other: "其他" },
+    statuses: { working: "上班", leave: "休假", reassigned: "代班", standby: "待命" },
+  };
+  return groups.map(([group, title]) => `
+    <div class="card stat-card">
+      <p class="stat-label">${title}</p>
+      ${Object.entries(state.labelSettings[group]).map(([key, value]) => `<label>${keyLabels[group][key] || key}<input name="${group}.${key}" value="${value}"></label>`).join("")}
+    </div>
+  `).join("");
+}
+
+function populateEmployeeForm(form, employeeId) {
+  const employee = getEmployeeById(employeeId);
+  if (!employee) return;
+  form.elements.employeeId.value = employee.id;
+  form.elements.name.value = employee.name;
+  form.elements.role.value = employee.role;
+  form.elements.shift.value = employee.shift;
+  form.elements.defaultRouteId.value = employee.defaultRouteId || "";
+  form.elements.isRelief.value = String(employee.isRelief);
+  form.elements.canCoverShift.value = String(!!employee.canCoverShift);
+  form.elements.employmentStatus.value = employee.employmentStatus || (employee.active ? "active" : "resigned");
+  Array.from(form.elements.supportLineIds.options).forEach((option) => {
+    option.selected = employee.supportLineIds.includes(option.value);
+  });
+}
+
+function populateRouteForm(form, routeId) {
+  const route = getRouteById(routeId);
+  if (!route) return;
+  form.elements.routeId.value = route.id;
+  form.elements.type.value = route.type;
+  form.elements.name.value = route.name;
+  form.elements.approvedMileage.value = route.approvedMileage;
+}
+
+function createEmployee(formData, currentUser) {
+  const supportLineIds = formData.getAll("supportLineIds");
+  const defaultRouteId = formData.get("defaultRouteId") || "";
+  const payload = {
+    name: (formData.get("name") || "").trim(),
+    role: formData.get("role"),
+    shift: formData.get("shift"),
+    defaultRouteId,
+    supportLineIds,
+    isRelief: formData.get("isRelief") === "true",
+    canCoverShift: formData.get("canCoverShift") === "true",
+    employmentStatus: formData.get("employmentStatus") || "active",
+    active: (formData.get("employmentStatus") || "active") === "active",
+    fixedDuty: defaultRouteId ? (getRouteById(defaultRouteId)?.name || "") : "",
+    isNightOwner: getRouteById(defaultRouteId)?.name === "大夜班",
+  };
+  const employeeId = formData.get("employeeId");
+  const existing = employeeId ? getEmployeeById(employeeId) : null;
+  if (existing) {
+    Object.assign(existing, payload);
+    logAction({
+      actorId: currentUser.id,
+      action: "employee-update",
+      targetType: "employee",
+      targetId: existing.id,
+      summary: `更新員工 ${existing.name}`,
+      detail: `${roleLabels[existing.role]} / ${existing.defaultRouteId ? getRouteById(existing.defaultRouteId)?.name || "" : "未指定路線"}`,
+    });
+  } else {
+    const employee = { id: makeId("emp"), ...payload };
+    state.employees.push(employee);
+    logAction({
+      actorId: currentUser.id,
+      action: "employee-create",
+      targetType: "employee",
+      targetId: employee.id,
+      summary: `新增員工 ${employee.name}`,
+      detail: `${roleLabels[employee.role]} / ${employee.defaultRouteId ? getRouteById(employee.defaultRouteId)?.name || "" : "未指定路線"}`,
+    });
+  }
+  saveState();
+}
+function createRoute(formData, currentUser) {
+  const payload = {
+    type: formData.get("type"),
+    name: formData.get("name").trim(),
+    approvedMileage: Number(formData.get("approvedMileage")),
+  };
+  const routeId = formData.get("routeId");
+  const existing = routeId ? getRouteById(routeId) : null;
+  if (existing) {
+    Object.assign(existing, payload);
+    logAction({
+      actorId: currentUser.id,
+      action: "route-update",
+      targetType: "route",
+      targetId: existing.id,
+      summary: `更新路線 ${existing.name}`,
+      detail: `${displayRouteType(existing.type)} / 核定里程 ${existing.approvedMileage} 公里`,
+    });
+  } else {
+    const route = { id: makeId("route"), ...payload };
+    state.routes.push(route);
+    logAction({
+      actorId: currentUser.id,
+      action: "route-create",
+      targetType: "route",
+      targetId: route.id,
+      summary: `新增路線 ${route.name}`,
+      detail: `${displayRouteType(route.type)} / 核定里程 ${route.approvedMileage} 公里`,
+    });
+  }
+  saveState();
+}
+
+function updateLabels(formData, currentUser) {
+  for (const [key, value] of formData.entries()) {
+    const [group, itemKey] = key.split(".");
+    state.labelSettings[group][itemKey] = value.trim();
+  }
+  logAction({
+    actorId: currentUser.id,
+    action: "label-update",
+    targetType: "settings",
+    targetId: "label-settings",
+    summary: "更新顯示名稱設定",
+    detail: "已更新班別、假別與狀態名稱。",
+  });
+  saveState();
+}
+
+function updateCompanyHolidays(formData, currentUser) {
+  state.companySettings.weekendDaysOff = true;
+  state.companySettings.holidays = [...new Set(
+    formData.get("holidays")
+      .split(/\r?\n/)
+      .map((value) => value.trim())
+      .filter(Boolean)
+  )].sort();
+
+  logAction({
+    actorId: currentUser.id,
+    action: "holiday-update",
+    targetType: "settings",
+    targetId: "company-holidays",
+    summary: "更新公司休假日",
+    detail: `週末固定休假 / 公司休假日 ${state.companySettings.holidays.length} 天`,
+  });
+  saveState();
+}
+
+function renderHistoryQueryPanel(currentUser) {
+  const section = createSection("歷史班表查詢", "可指定日期區間與員工，查詢過去或未來的班表記錄。");
+  const lastMonth = getMonthRange(getToday(), -1);
+  section.innerHTML += `
+    <form id="historyQueryForm" class="form-grid">
+      <label>開始日期<input name="startDate" type="date" value="${lastMonth.startDate}"></label>
+      <label>結束日期<input name="endDate" type="date" value="${lastMonth.endDate}"></label>
+      <label>員工篩選<select name="employeeId"><option value="">全部員工</option>${employeeOptions({ includeAll: true })}</select></label>
+      <label>狀態篩選
+        <select name="statusFilter">
+          <option value="">全部狀態</option>
+          ${Object.entries(state.labelSettings.statuses).map(([k, v]) => `<option value="${k}">${v}</option>`).join("")}
+        </select>
+      </label>
+      <button type="submit">查詢</button>
+    </form>
+    <div id="historyQueryResult"></div>
+  `;
+
+  section.querySelector("#historyQueryForm").addEventListener("submit", (event) => {
+    event.preventDefault();
+    const fd = new FormData(event.currentTarget);
+    const startDate = fd.get("startDate");
+    const endDate = fd.get("endDate");
+    const employeeId = fd.get("employeeId");
+    const statusFilter = fd.get("statusFilter");
+    if (!startDate || !endDate || startDate > endDate) {
+      window.alert("請確認日期區間正確。");
+      return;
+    }
+    let results = state.assignments.filter((a) => a.date >= startDate && a.date <= endDate);
+    if (employeeId) results = results.filter((a) => a.employeeId === employeeId);
+    if (statusFilter) results = results.filter((a) => a.status === statusFilter);
+    results.sort((a, b) => a.date.localeCompare(b.date) || (getEmployeeById(a.employeeId)?.name || "").localeCompare(getEmployeeById(b.employeeId)?.name || "", "zh-Hant"));
+
+    const container = section.querySelector("#historyQueryResult");
+    if (!results.length) {
+      container.innerHTML = `<div class="empty-state" style="margin-top:12px;"><p>查無符合條件的班表記錄。</p></div>`;
+      return;
+    }
+    container.innerHTML = "";
+    container.style.marginTop = "12px";
+    container.appendChild(renderAssignmentTable(results, true));
+  });
+
+  return section;
+}
+
+function renderDataManagementPanel(currentUser) {
+  const section = createSection("資料管理", "可匯出備份、匯入回復，或重設回初始資料。");
+  const grid = document.createElement("div");
+  grid.className = "panel-grid";
+  grid.innerHTML = `
+    <div class="card panel master-card">
+      <div class="section-heading">
+        <div>
+          <h3>備份匯出</h3>
+          <p class="muted">將目前所有資料（員工、路線、班表、異動紀錄、設定）匯出為 JSON 檔案。</p>
+        </div>
+      </div>
+      <button type="button" id="exportBackupButton">匯出 JSON 備份</button>
+    </div>
+    <div class="card panel master-card">
+      <div class="section-heading">
+        <div>
+          <h3>匯入回復</h3>
+          <p class="muted">選擇先前匯出的 JSON 備份檔案，覆蓋目前全部資料。此操作不可逆。</p>
+        </div>
+      </div>
+      <label>選擇備份檔案<input type="file" id="importBackupFile" accept=".json"></label>
+      <button type="button" class="secondary" id="importBackupButton" disabled>匯入並覆蓋</button>
+    </div>
+    <div class="card panel master-card">
+      <div class="section-heading">
+        <div>
+          <h3>重設資料</h3>
+          <p class="muted">清除所有修改，恢復系統初始的路線、員工與班表資料。</p>
+        </div>
+      </div>
+      <button type="button" class="warn" id="resetDataButton">一鍵重設初始資料</button>
+    </div>
+  `;
+  section.appendChild(grid);
+
+  grid.querySelector("#exportBackupButton").addEventListener("click", () => {
+    const blob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    const now = new Date();
+    const ts = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}_${String(now.getHours()).padStart(2, "0")}${String(now.getMinutes()).padStart(2, "0")}`;
+    a.href = url;
+    a.download = `logistics-backup-${ts}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    logAction({
+      actorId: currentUser.id,
+      action: "backup-export",
+      targetType: "settings",
+      targetId: "full-backup",
+      summary: "匯出完整備份",
+      detail: `檔名 logistics-backup-${ts}.json`,
+    });
+    saveState();
+  });
+
+  const fileInput = grid.querySelector("#importBackupFile");
+  const importButton = grid.querySelector("#importBackupButton");
+  fileInput.addEventListener("change", () => {
+    importButton.disabled = !fileInput.files.length;
+  });
+  importButton.addEventListener("click", () => {
+    const file = fileInput.files[0];
+    if (!file) return;
+    const confirmed = window.confirm(`確定要匯入「${file.name}」並覆蓋現有資料嗎？\n此操作不可逆，建議先匯出備份。`);
+    if (!confirmed) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const imported = JSON.parse(e.target.result);
+        if (!imported.employees || !imported.routes || !imported.assignments) {
+          window.alert("檔案格式不正確，缺少必要的資料欄位。");
+          return;
+        }
+        Object.assign(state, imported);
+        saveState();
+        window.alert("資料已成功匯入回復（含同步至雲端）。頁面將重新載入。");
+        location.reload();
+      } catch (err) {
+        window.alert("JSON 解析失敗：" + err.message);
+      }
+    };
+    reader.readAsText(file);
+  });
+
+  grid.querySelector("#resetDataButton").addEventListener("click", () => {
+    const confirmed = window.confirm("確定要重設所有資料嗎？\n這會清除全部班表、員工修改與異動紀錄，恢復為系統初始狀態。\n\n此操作不可逆，建議先匯出備份。");
+    if (!confirmed) return;
+    const doubleConfirm = window.confirm("再次確認：真的要重設嗎？");
+    if (!doubleConfirm) return;
+    localStorage.removeItem(STORAGE_KEY);
+    state = buildInitialState();
+    // Clear Firebase too
+    if (firebaseReady) {
+      stateRef.set(state).then(() => {
+        window.alert("已恢復初始資料（含雲端）。頁面將重新載入。");
+        location.reload();
+      }).catch(() => {
+        saveState();
+        window.alert("已恢復初始資料（雲端清除失敗，下次同步時覆蓋）。頁面將重新載入。");
+        location.reload();
+      });
+    } else {
+      saveState();
+      window.alert("已恢復初始資料。頁面將重新載入。");
+      location.reload();
+    }
+  });
+
+  return section;
+}
+
+function renderAuditPanel() {
+  const section = createSection("異動紀錄總覽", "主管可追溯固定班表生成、請假、代班與主資料調整。");
+  const timeline = document.createElement("div");
+  timeline.className = "timeline";
+  state.auditLogs.slice(0, 12).forEach((log) => {
+    const actor = getEmployeeById(log.actorId);
+    const item = document.createElement("article");
+    item.className = "timeline-item";
+    item.innerHTML = `
+      <p><strong>${log.summary}</strong></p>
+      <p>${log.detail}</p>
+      <p class="muted">${formatTimestamp(log.timestamp)} ｜ ${actor ? actor.name : "系統"} ｜ ${log.action}</p>
+    `;
+    timeline.appendChild(item);
+  });
+  section.appendChild(timeline);
+  return section;
+}
+function render() {
+  syncSelectors();
+  const currentUser = getEmployeeById(state.session.userId) || getRoleUsers(state.session.role)[0];
+  if (!currentUser) {
+    appEl.innerHTML = `<section class="card empty-state"><h2>找不到可用的登入人員</h2><p>請先到基本資料建立員工，或切換角色後再試一次。</p></section>`;
+    return;
+  }
+
+  state.session.userId = currentUser.id;
+  saveState();
+  roleHint.textContent = buildRoleHint(currentUser.role);
+  appEl.innerHTML = "";
+  appEl.appendChild(renderPrototypeNotice());
+  if (["teamLeader", "supervisor", "adminStaff"].includes(currentUser.role)) {
+    appEl.appendChild(renderManagementLaunchers());
+  }
+  appEl.appendChild(renderStats(currentUser));
+  appEl.appendChild(renderEmployeeHome(currentUser));
+
+  if (["teamLeader", "supervisor"].includes(currentUser.role)) {
+    appEl.appendChild(renderSchedulingWorkbenchV2(currentUser));
+  }
+  if (["adminStaff", "supervisor"].includes(currentUser.role)) {
+    appEl.appendChild(renderMasterDataPanel(currentUser));
+  }
+  if (["teamLeader", "supervisor"].includes(currentUser.role)) {
+    appEl.appendChild(renderHistoryQueryPanel(currentUser));
+  }
+  if (["adminStaff", "supervisor"].includes(currentUser.role)) {
+    appEl.appendChild(renderDataManagementPanel(currentUser));
+  }
+  if (currentUser.role === "supervisor") {
+    appEl.appendChild(renderAuditPanel());
+  }
+}
+
+roleSelect.addEventListener("change", (event) => {
+  const newRole = event.target.value;
+  if (!requirePin(newRole)) {
+    event.target.value = state.session.role;
+    return;
+  }
+  state.session.role = newRole;
+  const users = getRoleUsers(state.session.role);
+  state.session.userId = users[0]?.id || "";
+  saveState();
+  render();
+});
+
+userSelect.addEventListener("change", (event) => {
+  state.session.userId = event.target.value;
+  saveState();
+  render();
+});
+
+if (protectedRoles.includes(state.session.role)) {
+  state.session.role = "operator";
+  const users = getRoleUsers("operator");
+  state.session.userId = users[0]?.id || "";
+  saveState();
+}
+
+// Initial render with localStorage data
+render();
+
+// ─── Firebase Initialization ───
+(async function initFirebase() {
+  try {
+    const snapshot = await stateRef.once("value");
+    if (snapshot.exists()) {
+      const firebaseState = ensureArrays(snapshot.val());
+      // Validate basic structure
+      if (firebaseState.employees && firebaseState.routes && firebaseState.assignments) {
+        // Preserve current session (local role/user)
+        const localSession = { ...state.session };
+        state = firebaseState;
+        state.session = localSession;
+        // Run migrations
+        state.employees.forEach((employee) => {
+          if (!employee.employmentStatus) {
+            employee.employmentStatus = employee.active ? "active" : "resigned";
+          }
+          employee.active = employee.employmentStatus === "active";
+          if (typeof employee.canCoverShift !== "boolean") {
+            employee.canCoverShift = !!employee.isRelief;
+          }
+        });
+        state.session = state.session || {};
+        state.session.lastGeneratedRange = state.session.lastGeneratedRange || null;
+        state.labelSettings = state.labelSettings || {};
+        state.labelSettings.leaveTypes = {
+          annual: "特休", personal: "事假", sick: "病假",
+          official: "公假", injury: "公傷", other: "其他",
+          ...(state.labelSettings.leaveTypes || {}),
+        };
+        if (!state.pinSettings) {
+          state.pinSettings = { teamLeader: "1234", adminStaff: "1234", supervisor: "0000" };
+        }
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+        render();
+        showSyncStatus("synced", "已從雲端載入資料");
+      }
+    } else {
+      // First time: upload local state to Firebase
+      await stateRef.set(state);
+      showSyncStatus("synced", "已上傳資料至雲端");
+    }
+
+    firebaseReady = true;
+    hideLoading();
+
+    // Real-time listener for other users' changes
+    stateRef.on("value", (snap) => {
+      if (isSavingToFirebase) return; // Skip our own writes
+      if (!snap.exists()) return;
+      const remoteState = ensureArrays(snap.val());
+      if (!remoteState.employees || !remoteState.routes) return;
+      // Preserve local session
+      const localSession = { ...state.session };
+      state = remoteState;
+      state.session = localSession;
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      render();
+      showSyncStatus("synced", "已同步其他使用者的變更");
+    });
+  } catch (err) {
+    console.warn("Firebase init failed, using localStorage only:", err);
+    firebaseReady = false;
+    hideLoading();
+    showSyncStatus("error", "雲端連線失敗，使用本機資料");
+  }
+})();
+
+
+
+
+
+
+
+
+
+
+
+
