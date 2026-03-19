@@ -2034,7 +2034,14 @@ function renderMasterDataPanel(currentUser) {
     employeeForm.reset();
     employeeForm.elements.employeeId.value = "";
   });
-  employeePanel.appendChild(renderEmployeeTable());
+  const empDetails = document.createElement("details");
+  empDetails.className = "collapsible-list";
+  const empSummary = document.createElement("summary");
+  const empCount = state.employees.filter(e => (e.employmentStatus || "active") === "active").length;
+  empSummary.textContent = `目前員工清單（${empCount} 人）`;
+  empDetails.appendChild(empSummary);
+  empDetails.appendChild(renderEmployeeTable());
+  employeePanel.appendChild(empDetails);
 
   const routeForm = routePanel.querySelector("#routeForm");
   routeForm.addEventListener("submit", (event) => {
@@ -2047,7 +2054,13 @@ function renderMasterDataPanel(currentUser) {
     routeForm.reset();
     routeForm.elements.routeId.value = "";
   });
-  routePanel.appendChild(renderRouteTable());
+  const routeDetails = document.createElement("details");
+  routeDetails.className = "collapsible-list";
+  const routeSummary = document.createElement("summary");
+  routeSummary.textContent = `目前路線清單（${state.routes.length} 條）`;
+  routeDetails.appendChild(routeSummary);
+  routeDetails.appendChild(renderRouteTable());
+  routePanel.appendChild(routeDetails);
 
   labelsPanel.querySelector("#labelsForm").addEventListener("submit", (event) => {
     event.preventDefault();
