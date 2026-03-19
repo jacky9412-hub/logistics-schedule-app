@@ -834,9 +834,21 @@ function renderEmployeeHome(currentUser) {
       <span class="tag">${roleLabels[currentUser.role]}</span>
       <span class="tag">${getLabel("shifts", currentUser.shift)}</span>
       ${currentUser.isRelief ? `<span class="tag">備員</span>` : ""}
+      ${currentUser.canCoverShift && !currentUser.isRelief ? `<span class="tag">可支援代班</span>` : ""}
       ${currentUser.isNightOwner ? `<span class="tag">固定大夜班</span>` : ""}
     </div>
     <p class="muted">固定路線：${defaultRoute ? `${defaultRoute.name} / 核定里程 ${defaultRoute.approvedMileage} 公里` : "未設定"}</p>
+    ${(currentUser.supportLineIds && currentUser.supportLineIds.length > 0) ? `
+      <div style="margin-top:8px;">
+        <p class="muted" style="margin:0 0 6px;font-size:0.85rem;">可支援路線：</p>
+        <div class="inline-list">
+          ${currentUser.supportLineIds.map((routeId) => {
+            const route = getRouteById(routeId);
+            return route ? `<span class="brand">${route.name}</span>` : "";
+          }).filter(Boolean).join("")}
+        </div>
+      </div>
+    ` : ""}
   `;
 
   todayBody.append(highlight, profile);
