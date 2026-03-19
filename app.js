@@ -647,7 +647,10 @@ function labelOptions(group) {
 
 function describeAssignment(assignment) {
   const route = getRouteById(assignment.routeId);
-  return `${getLabel("shifts", assignment.shift)} / ${route ? route.name : "未指定路線"} / ${getLabel("statuses", assignment.status)}`;
+  const secondaryRoute = assignment.secondaryRouteId ? getRouteById(assignment.secondaryRouteId) : null;
+  const routeText = route ? route.name : "未指定路線";
+  const mergedText = secondaryRoute ? ` + 併線：${secondaryRoute.name}` : "";
+  return `${getLabel("shifts", assignment.shift)} / ${routeText}${mergedText} / ${getLabel("statuses", assignment.status)}`;
 }
 
 function buildRoleHint(role) {
@@ -781,6 +784,8 @@ function renderEmployeeHome(currentUser) {
 
   if (todayAssignment) {
     const route = getRouteById(todayAssignment.routeId);
+    const secondaryRoute = todayAssignment.secondaryRouteId ? getRouteById(todayAssignment.secondaryRouteId) : null;
+    const isMerged = !!secondaryRoute;
     const differs = !!defaultRoute && route && defaultRoute.id !== route.id;
     highlight.innerHTML = `
       <div class="tag-row">
@@ -789,18 +794,30 @@ function renderEmployeeHome(currentUser) {
         ${todayAssignment.leaveType ? `<span class="pill alert">${getLabel("leaveTypes", todayAssignment.leaveType)}</span>` : ""}
         <span class="pill">${todayAssignment.source === "default" ? "固定配置" : "異動覆蓋"}</span>
         ${todayAssignment.status === "reassigned" || differs ? `<span class="pill brand">代班 / 支援</span>` : ""}
+        ${isMerged ? `<span class="pill alert">併線</span>` : ""}
       </div>
       ${route
-        ? `<div class="big-value">${route.name}</div>
-           <div class="inline-list">
-             <span>${displayRouteType(route.type)}</span>
-             <span>核定里程 ${route.approvedMileage} 公里</span>
-             <span>${todayAssignment.note || "無備註"}</span>
-           </div>`
+        ? `<div class="big-value">${route.name}${isMerged ? ` + ${secondaryRoute.name}` : ""}</div>
+           ${isMerged ? `
+             <div class="inline-list" style="margin-bottom:6px;">
+               <span class="brand">上午：${route.name}</span>
+               <span class="brand">下午：${secondaryRoute.name}</span>
+             </div>
+             <div class="inline-list">
+               <span>請參照上下午路線核定里程表</span>
+               <span>${todayAssignment.note || "無備註"}</span>
+             </div>
+           ` : `
+             <div class="inline-list">
+               <span>${displayRouteType(route.type)}</span>
+               <span>核定里程 ${route.approvedMileage} 公里</span>
+               <span>${todayAssignment.note || "無備註"}</span>
+             </div>
+           `}`
         : `<p class="no-route-notice" style="font-size:0.95rem;font-weight:600;margin:4px 0;">未指定路線</p>
            <p class="muted" style="margin:0;font-size:0.85rem;">${todayAssignment.note || "尚未指派路線，請聯繫管理端。"}</p>`
       }
-      <div class="notice">${defaultRoute ? `固定配置：${defaultRoute.name}${differs ? `，今日改派：${route?.name || "未指定路線"}` : ""}` : "目前沒有固定路線，可由管理端安排支援。"}</div>
+      <div class="notice">${defaultRoute ? `固定配置：${defaultRoute.name}${differs ? `，今日改派：${route?.name || "未指定路線"}${isMerged ? ` + ${secondaryRoute.name}（併線）` : ""}` : ""}` : "目前沒有固定路線，可由管理端安排支援。"}</div>
     `;
   } else if (defaultRoute) {
     highlight.innerHTML = `
@@ -878,15 +895,19 @@ function renderAssignmentTable(assignments, includeEmployee = true) {
   const rows = assignments.map((assignment) => {
     const employee = getEmployeeById(assignment.employeeId);
     const route = getRouteById(assignment.routeId);
+    const secondaryRoute = assignment.secondaryRouteId ? getRouteById(assignment.secondaryRouteId) : null;
     const defaultRoute = getDefaultRoute(employee);
+    const routeDisplay = route ? (secondaryRoute ? `上午：${route.name}<br>下午：${secondaryRoute.name}` : route.name) : "-";
+    const mileageDisplay = secondaryRoute ? "參照里程表" : (route ? `${route.approvedMileage} 公里` : "-");
+    const statusDisplay = getLabel("statuses", assignment.status) + (secondaryRoute ? " / 併線" : "");
     return `
       <tr>
         <td>${formatDate(assignment.date)}</td>
         ${includeEmployee ? `<td>${employee ? employee.name : assignment.employeeId}</td>` : ""}
         <td>${defaultRoute ? defaultRoute.name : "未指定路線"}</td>
-        <td>${route ? route.name : "-"}</td>
-        <td>${route ? `${route.approvedMileage} 公里` : "-"}</td>
-        <td>${getLabel("statuses", assignment.status)}</td>
+        <td>${routeDisplay}</td>
+        <td>${mileageDisplay}</td>
+        <td>${statusDisplay}</td>
         <td>${assignment.leaveType ? getLabel("leaveTypes", assignment.leaveType) : "-"}</td>
         <td>${assignment.source === "default" ? "固定配置" : "異動覆蓋"}</td>
         <td>${assignment.note || "-"}</td>
@@ -965,8 +986,9 @@ function renderSchedulingWorkbenchV2(currentUser) {
       <label>代班結束日期<input name="endDate" type="date" value="${getToday()}"></label>
       <label>被代班員工（請假者）<select name="originalEmployeeId">${employeeOptions({ includeAll: true })}</select></label>
       <label>代班人員<select name="reliefEmployeeId">${employeeOptions({ includeReliefOnly: true })}</select></label>
-      <label>代班路線<select name="routeId"><option value="">沿用請假者固定路線</option>${routeOptions()}</select></label>
-      <label>備註<textarea name="note" placeholder="例如：支援大夜班、臨時調度"></textarea></label>
+      <label>代班路線（上午 / 主要）<select name="routeId"><option value="">沿用請假者固定路線</option>${routeOptions()}</select></label>
+      <label>併線路線（下午）<select name="secondaryRouteId"><option value="">無（不併線）</option>${routeOptions()}</select></label>
+      <label>備註<textarea name="note" placeholder="例如：支援大夜班、臨時調度、併線"></textarea></label>
       <button type="submit">儲存代班</button>
     </form>
   `;
@@ -1016,6 +1038,7 @@ function renderSchedulingWorkbenchV2(currentUser) {
     const listHtml = matches.map((item) => {
       const a = item.assignment;
       const route = getRouteById(a.routeId);
+      const secRoute = a.secondaryRouteId ? getRouteById(a.secondaryRouteId) : null;
       return `
         <div class="card stat-card" style="margin-top:8px;" data-asg-id="${a.id}">
           <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;">
@@ -1026,8 +1049,9 @@ function renderSchedulingWorkbenchV2(currentUser) {
                 <span class="pill ${a.status === "leave" ? "alert" : ""}">${getLabel("statuses", a.status)}</span>
                 ${a.leaveType ? `<span class="pill alert">${getLabel("leaveTypes", a.leaveType)}</span>` : ""}
                 <span class="pill">${a.source === "default" ? "固定配置" : "異動覆蓋"}</span>
+                ${secRoute ? `<span class="pill alert">併線</span>` : ""}
               </div>
-              <p class="muted" style="margin:0;">路線：${route ? route.name : "未指定"} ｜ 備註：${a.note || "無"}</p>
+              <p class="muted" style="margin:0;">路線：${route ? route.name : "未指定"}${secRoute ? ` ｜ 併線：${secRoute.name}` : ""} ｜ 備註：${a.note || "無"}</p>
             </div>
             <div style="display:flex;gap:6px;flex-shrink:0;">
               <button type="button" class="secondary editSingleButton" data-asg-id="${a.id}">編輯</button>
@@ -1066,7 +1090,8 @@ function renderSchedulingWorkbenchV2(currentUser) {
             <label>狀態<select name="status">${Object.entries(state.labelSettings.statuses).map(([k, v]) => `<option value="${k}" ${asg.status === k ? "selected" : ""}>${v}</option>`).join("")}</select></label>
             <label>假別<select name="leaveType">${Object.entries(state.labelSettings.leaveTypes).map(([k, v]) => `<option value="${k}" ${asg.leaveType === k ? "selected" : ""}>${v}</option>`).join("")}<option value="" ${!asg.leaveType ? "selected" : ""}>無</option></select></label>
             <label>班別<select name="shift">${Object.entries(state.labelSettings.shifts).map(([k, v]) => `<option value="${k}" ${asg.shift === k ? "selected" : ""}>${v}</option>`).join("")}</select></label>
-            <label>路線<select name="routeId">${state.routes.map((r) => `<option value="${r.id}" ${asg.routeId === r.id ? "selected" : ""}>${r.name}</option>`).join("")}</select></label>
+            <label>路線（上午 / 主要）<select name="routeId">${state.routes.map((r) => `<option value="${r.id}" ${asg.routeId === r.id ? "selected" : ""}>${r.name}</option>`).join("")}</select></label>
+            <label>併線路線（下午）<select name="secondaryRouteId"><option value="" ${!asg.secondaryRouteId ? "selected" : ""}>無（不併線）</option>${state.routes.map((r) => `<option value="${r.id}" ${asg.secondaryRouteId === r.id ? "selected" : ""}>${r.name}</option>`).join("")}</select></label>
             <label>備註<textarea name="note">${asg.note || ""}</textarea></label>
             <button type="submit">儲存修改</button>
           </form>`;
@@ -1085,6 +1110,7 @@ function renderSchedulingWorkbenchV2(currentUser) {
           target.leaveType = fd.get("status") === "leave" ? fd.get("leaveType") : "";
           target.shift = fd.get("shift");
           target.routeId = fd.get("routeId");
+          target.secondaryRouteId = fd.get("secondaryRouteId") || "";
           target.note = (fd.get("note") || "").trim();
           target.source = "override";
           logAction({
@@ -1180,15 +1206,19 @@ function openDailyBoardWindow() {
   const rows = getAssignmentsByDate(getToday()).map((assignment) => {
     const employee = getEmployeeById(assignment.employeeId);
     const route = getRouteById(assignment.routeId);
+    const secondaryRoute = assignment.secondaryRouteId ? getRouteById(assignment.secondaryRouteId) : null;
     const defaultRoute = getDefaultRoute(employee);
+    const routeDisplay = route ? (secondaryRoute ? `上午：${route.name} / 下午：${secondaryRoute.name}` : route.name) : "-";
+    const mileageDisplay = secondaryRoute ? "參照里程表" : (route ? `${route.approvedMileage} 公里` : "-");
+    const statusDisplay = getLabel("statuses", assignment.status) + (secondaryRoute ? " / 併線" : "");
     return `
       <tr>
         <td>${employee ? employee.name : assignment.employeeId}</td>
         <td>${roleLabels[employee?.role] || "-"}</td>
         <td>${defaultRoute ? defaultRoute.name : "未指定路線"}</td>
-        <td>${route ? route.name : "-"}</td>
-        <td>${route ? `${route.approvedMileage} 公里` : "-"}</td>
-        <td>${getLabel("statuses", assignment.status)}</td>
+        <td>${routeDisplay}</td>
+        <td>${mileageDisplay}</td>
+        <td>${statusDisplay}</td>
         <td>${assignment.source === "default" ? "固定配置" : "異動覆蓋"}</td>
         <td>${assignment.note || "-"}</td>
       </tr>
@@ -1363,17 +1393,23 @@ function openRangeBoardWindow(startDate, endDate) {
     const cells = visibleDates.map((dateString) => {
       const assignment = getDisplayAssignment(employee, dateString);
       const route = assignment ? getRouteById(assignment.routeId) : null;
+      const secondaryRoute = assignment?.secondaryRouteId ? getRouteById(assignment.secondaryRouteId) : null;
       const status = assignment ? getLabel("statuses", assignment.status) : "-";
       const leaveType = assignment?.leaveType ? getLabel("leaveTypes", assignment.leaveType) : "";
       const sourceLabel = assignment?.source === "override" ? "\u7570\u52d5" : assignment ? "\u56fa\u5b9a" : "";
       if (assignment?.source === "override") hasOverride = true;
-      const cellClass = [assignment?.source === "override" ? "override-cell" : ""].filter(Boolean).join(" ");
-      const routeText = assignment?.status === "leave"
-        ? (leaveType || "\u4f11\u5047")
-        : (route ? route.name : (defaultRoute ? defaultRoute.name : "-"));
+      const cellClass = [assignment?.source === "override" ? "override-cell" : "", secondaryRoute ? "merged-cell" : ""].filter(Boolean).join(" ");
+      let routeText;
+      if (assignment?.status === "leave") {
+        routeText = leaveType || "\u4f11\u5047";
+      } else if (secondaryRoute) {
+        routeText = `${route?.name || "-"}+${secondaryRoute.name}`;
+      } else {
+        routeText = route ? route.name : (defaultRoute ? defaultRoute.name : "-");
+      }
       const secondaryText = assignment?.status === "leave"
         ? (leaveType ? `${leaveType} / \u4f11\u5047` : "\u4f11\u5047")
-        : status;
+        : (secondaryRoute ? `\u4f75\u7dda / ${status}` : status);
       return `
         <td class="${cellClass}">
           <div class="month-route">${routeText}</div>
@@ -1423,6 +1459,7 @@ function openRangeBoardWindow(startDate, endDate) {
         .sticky-name { position: sticky; left: 0; background: #fff8ef; z-index: 1; min-width: 90px; width: 90px; }
         .sticky-name small { display: block; color: #6f6254; margin-top: 4px; }
         .override-cell { background: #fff0e8; }
+        .merged-cell { background: #fce8f0; }
         .month-route { font-weight: 700; margin-bottom: 2px; font-size: 12px; line-height: 1.25; word-break: break-word; }
         .month-meta { color: #6f6254; font-size: 11px; line-height: 1.25; word-break: break-word; }
         tr.hidden-row { display: none; }
@@ -1717,10 +1754,16 @@ function applyReliefOnly(formData, currentUser) {
   }
 
   const route = payload.routeId ? getRouteById(payload.routeId) : null;
+  const secondaryRoute = payload.secondaryRouteId ? getRouteById(payload.secondaryRouteId) : null;
   const defaultRoute = getDefaultRoute(originalEmployee);
   const reliefRouteId = route ? route.id : (defaultRoute ? defaultRoute.id : "");
+  const secondaryRouteId = secondaryRoute ? secondaryRoute.id : "";
+  const isMerged = !!secondaryRouteId;
   const shift = route ? inferShift(route.name) : (defaultRoute ? originalEmployee.shift : "day");
-  const note = (payload.note || "").trim() || `${originalEmployee.name} 休假代班`;
+  let note = (payload.note || "").trim() || `${originalEmployee.name} 休假代班`;
+  if (isMerged && !note.includes("併線")) {
+    note += "（併線）";
+  }
   const dates = enumerateDates(startDate, endDate);
   let processed = 0;
   let skippedHoliday = 0;
@@ -1734,6 +1777,7 @@ function applyReliefOnly(formData, currentUser) {
     const reliefExisting = getAssignmentByEmployeeDate(reliefEmployee.id, dateString);
     if (reliefExisting) {
       reliefExisting.routeId = reliefRouteId;
+      reliefExisting.secondaryRouteId = secondaryRouteId;
       reliefExisting.shift = shift;
       reliefExisting.status = "reassigned";
       reliefExisting.leaveType = "";
@@ -1745,6 +1789,7 @@ function applyReliefOnly(formData, currentUser) {
         date: dateString,
         employeeId: reliefEmployee.id,
         routeId: reliefRouteId,
+        secondaryRouteId,
         shift,
         status: "reassigned",
         leaveType: "",
@@ -1761,13 +1806,14 @@ function applyReliefOnly(formData, currentUser) {
     return false;
   }
 
+  const mergedInfo = isMerged ? `（併線：上午 ${route?.name || "固定路線"} / 下午 ${secondaryRoute.name}）` : "";
   logAction({
     actorId: currentUser.id,
     action: "relief",
     targetType: "assignment",
     targetId: reliefEmployee.id,
-    summary: `${reliefEmployee.name} 代班 ${originalEmployee.name}，${startDate} 至 ${endDate}`,
-    detail: `${route ? `路線 ${route.name}，核定里程 ${route.approvedMileage} 公里` : `沿用 ${originalEmployee.name} 固定路線`}。套用 ${processed} 天${skippedHoliday ? `，略過假日 ${skippedHoliday} 天` : ""}。`,
+    summary: `${reliefEmployee.name} 代班 ${originalEmployee.name}，${startDate} 至 ${endDate}${isMerged ? "（併線）" : ""}`,
+    detail: `${route ? `路線 ${route.name}` : `沿用 ${originalEmployee.name} 固定路線`}${mergedInfo}。套用 ${processed} 天${skippedHoliday ? `，略過假日 ${skippedHoliday} 天` : ""}。`,
   });
 
   saveState();
