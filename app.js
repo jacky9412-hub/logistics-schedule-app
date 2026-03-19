@@ -357,6 +357,7 @@ function buildInitialState() {
       teamLeader: "1234",
       adminStaff: "1234",
       supervisor: "0000",
+      individual: {},
     },
     employees,
     routes,
@@ -412,7 +413,10 @@ function loadState() {
       ...(parsed.labelSettings.leaveTypes || {}),
     };
     if (!parsed.pinSettings) {
-      parsed.pinSettings = { teamLeader: "1234", adminStaff: "1234", supervisor: "0000" };
+      parsed.pinSettings = { teamLeader: "1234", adminStaff: "1234", supervisor: "0000", individual: {} };
+    }
+    if (!parsed.pinSettings.individual) {
+      parsed.pinSettings.individual = {};
     }
     return parsed;
   } catch (error) {
@@ -425,6 +429,18 @@ const authenticatedRoles = new Set();
 
 const protectedRoles = ["teamLeader", "adminStaff", "supervisor"];
 
+// authenticatedUsers tracks which individual users have been verified (by employee ID)
+const authenticatedUsers = new Set();
+
+function getEmployeePin(employeeId) {
+  // Individual PIN takes priority; fallback to role-level PIN
+  if (state.pinSettings.individual && state.pinSettings.individual[employeeId]) {
+    return state.pinSettings.individual[employeeId];
+  }
+  const emp = getEmployeeById(employeeId);
+  return emp ? (state.pinSettings[emp.role] || "") : "";
+}
+
 function requirePin(role) {
   if (!protectedRoles.includes(role)) return true;
   if (authenticatedRoles.has(role)) return true;
@@ -435,6 +451,24 @@ function requirePin(role) {
     return true;
   }
   window.alert("PIN 碼錯誤，無法切換至該角色。");
+  return false;
+}
+
+function requireUserPin(employeeId) {
+  if (!employeeId) return false;
+  if (authenticatedUsers.has(employeeId)) return true;
+  const emp = getEmployeeById(employeeId);
+  if (!emp || !protectedRoles.includes(emp.role)) return true;
+  const correctPin = getEmployeePin(employeeId);
+  if (!correctPin) return true; // No PIN set, allow access
+  const pin = window.prompt(`請輸入「${emp.name}」的個人 PIN 碼：`);
+  if (pin === null) return false;
+  if (pin === correctPin) {
+    authenticatedUsers.add(employeeId);
+    authenticatedRoles.add(emp.role); // Also mark role as authenticated
+    return true;
+  }
+  window.alert("PIN 碼錯誤，無法切換至此帳號。");
   return false;
 }
 
@@ -1929,18 +1963,35 @@ function renderMasterDataPanel(currentUser) {
 
   const pinPanel = document.createElement("div");
   if (currentUser.role === "supervisor") {
+    // Build individual PIN inputs for protected role employees
+    const individualPinInputs = state.employees
+      .filter((emp) => protectedRoles.includes(emp.role) && emp.employmentStatus === "active")
+      .sort(compareEmployeesByScheduleOrder)
+      .map((emp) => {
+        const individualPin = (state.pinSettings.individual && state.pinSettings.individual[emp.id]) || "";
+        return `<label>${emp.name}（${roleLabels[emp.role]}）<input name="individual_${emp.id}" type="password" value="${individualPin}" maxlength="8" placeholder="未設定則用角色預設"></label>`;
+      })
+      .join("");
+
     pinPanel.className = "card panel master-card";
     pinPanel.innerHTML = `
       <div class="section-heading">
         <div>
           <h3>PIN 碼管理</h3>
-          <p class="muted">可修改各管理角色的登入 PIN 碼。頁面重新載入後需重新驗證。</p>
+          <p class="muted">可為每位管理人員設定個人 PIN 碼。未設定個人 PIN 的人員使用角色預設 PIN。</p>
         </div>
       </div>
       <form id="pinForm" class="form-grid">
-        <label>組長 PIN<input name="teamLeader" type="password" value="${state.pinSettings.teamLeader}" maxlength="8" required></label>
-        <label>行政 PIN<input name="adminStaff" type="password" value="${state.pinSettings.adminStaff}" maxlength="8" required></label>
-        <label>主管 PIN<input name="supervisor" type="password" value="${state.pinSettings.supervisor}" maxlength="8" required></label>
+        <div class="card stat-card">
+          <p class="stat-label">角色預設 PIN（通用）</p>
+          <label>組長預設 PIN<input name="teamLeader" type="password" value="${state.pinSettings.teamLeader}" maxlength="8" required></label>
+          <label>行政預設 PIN<input name="adminStaff" type="password" value="${state.pinSettings.adminStaff}" maxlength="8" required></label>
+          <label>主管預設 PIN<input name="supervisor" type="password" value="${state.pinSettings.supervisor}" maxlength="8" required></label>
+        </div>
+        <div class="card stat-card">
+          <p class="stat-label">個人 PIN（優先於角色預設）</p>
+          ${individualPinInputs}
+        </div>
         <button type="submit">儲存 PIN 碼</button>
       </form>
     `;
@@ -1996,16 +2047,32 @@ function renderMasterDataPanel(currentUser) {
       state.pinSettings.teamLeader = fd.get("teamLeader").trim() || "1234";
       state.pinSettings.adminStaff = fd.get("adminStaff").trim() || "1234";
       state.pinSettings.supervisor = fd.get("supervisor").trim() || "0000";
+      // Save individual PINs
+      if (!state.pinSettings.individual) state.pinSettings.individual = {};
+      for (const [key, value] of fd.entries()) {
+        if (key.startsWith("individual_")) {
+          const empId = key.replace("individual_", "");
+          const pin = value.trim();
+          if (pin) {
+            state.pinSettings.individual[empId] = pin;
+          } else {
+            delete state.pinSettings.individual[empId];
+          }
+        }
+      }
       logAction({
         actorId: currentUser.id,
         action: "pin-update",
         targetType: "settings",
         targetId: "pin-settings",
-        summary: "更新管理角色 PIN 碼",
-        detail: "已更新組長、行政與主管的 PIN 碼。",
+        summary: "更新 PIN 碼設定",
+        detail: "已更新角色預設 PIN 碼與個人 PIN 碼。",
       });
+      // Clear authenticated cache so new PINs take effect
+      authenticatedUsers.clear();
+      authenticatedRoles.clear();
       saveState();
-      window.alert("PIN 碼已更新。下次切換角色時將使用新的 PIN 碼。");
+      window.alert("PIN 碼已更新。下次切換帳號時將使用新的 PIN 碼。");
     });
   }
 
@@ -2451,19 +2518,34 @@ function render() {
 
 roleSelect.addEventListener("change", (event) => {
   const newRole = event.target.value;
-  if (!requirePin(newRole)) {
+  const users = getRoleUsers(newRole);
+  const firstUser = users[0];
+  // For protected roles, ask for the first user's individual PIN
+  if (protectedRoles.includes(newRole) && firstUser) {
+    if (!requireUserPin(firstUser.id)) {
+      event.target.value = state.session.role;
+      return;
+    }
+  } else if (!requirePin(newRole)) {
     event.target.value = state.session.role;
     return;
   }
   state.session.role = newRole;
-  const users = getRoleUsers(state.session.role);
-  state.session.userId = users[0]?.id || "";
+  state.session.userId = firstUser?.id || "";
   saveState();
   render();
 });
 
 userSelect.addEventListener("change", (event) => {
-  state.session.userId = event.target.value;
+  const newUserId = event.target.value;
+  // If switching to a different user in a protected role, verify their PIN
+  if (protectedRoles.includes(state.session.role) && !authenticatedUsers.has(newUserId)) {
+    if (!requireUserPin(newUserId)) {
+      event.target.value = state.session.userId; // Revert
+      return;
+    }
+  }
+  state.session.userId = newUserId;
   saveState();
   render();
 });
@@ -2509,7 +2591,10 @@ render();
           ...(state.labelSettings.leaveTypes || {}),
         };
         if (!state.pinSettings) {
-          state.pinSettings = { teamLeader: "1234", adminStaff: "1234", supervisor: "0000" };
+          state.pinSettings = { teamLeader: "1234", adminStaff: "1234", supervisor: "0000", individual: {} };
+        }
+        if (!state.pinSettings.individual) {
+          state.pinSettings.individual = {};
         }
         localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
         render();
