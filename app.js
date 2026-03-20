@@ -2869,85 +2869,111 @@ if (protectedRoles.includes(state.session.role)) {
 // Initial render with localStorage data
 render();
 
-// ─── Firebase Initialization ───
-(async function initFirebase() {
-  try {
-    const snapshot = await stateRef.once("value");
-    if (snapshot.exists()) {
-      const firebaseState = ensureArrays(snapshot.val());
-      // Validate basic structure
-      if (firebaseState.employees && firebaseState.routes && firebaseState.assignments) {
-        // Preserve current session (local role/user)
-        const localSession = { ...state.session };
-        state = firebaseState;
-        state.session = localSession;
-        // Run migrations
-        state.employees.forEach((employee) => {
-          if (!employee.employmentStatus) {
-            employee.employmentStatus = employee.active ? "active" : "resigned";
-          }
-          employee.active = employee.employmentStatus === "active";
-          if (typeof employee.canCoverShift !== "boolean") {
-            employee.canCoverShift = !!employee.isRelief;
-          }
-        });
-        state.session = state.session || {};
-        state.session.lastGeneratedRange = state.session.lastGeneratedRange || null;
-        state.labelSettings = state.labelSettings || {};
-        state.labelSettings.leaveTypes = {
-          annual: "特休", personal: "事假", sick: "病假",
-          official: "公假", injury: "公傷", other: "其他",
-          ...(state.labelSettings.leaveTypes || {}),
-        };
-        if (!state.pinSettings) {
-          state.pinSettings = { teamLeader: "1234", adminStaff: "1234", supervisor: "0000", individual: {} };
-        }
-        if (!state.pinSettings.individual) {
-          state.pinSettings.individual = {};
-        }
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-        render();
-      }
-    } else {
-      // First time: upload local state to Firebase (exclude session)
-      const syncData = { ...state };
-      delete syncData.session;
-      await stateRef.set(syncData);
+// ─── Firebase Initialization (with retry) ───
+function applyFirebaseState(firebaseState) {
+  const localSession = { ...state.session };
+  state = firebaseState;
+  state.session = localSession;
+  // Run migrations
+  state.employees.forEach((employee) => {
+    if (!employee.employmentStatus) {
+      employee.employmentStatus = employee.active ? "active" : "resigned";
     }
-    lastFirebaseSaveTime = Date.now(); // Prevent initial listener echo
-
-    firebaseReady = true;
-    firebaseInitialized = true; // Now it's safe to write to Firebase
-    hideLoading();
-
-    // Real-time listener for other users' changes
-    stateRef.on("value", (snap) => {
-      // Ignore echoes of our own writes (within 3 seconds)
-      if (Date.now() - lastFirebaseSaveTime < FIREBASE_ECHO_DELAY) return;
-      if (!snap.exists()) return;
-      const remoteState = ensureArrays(snap.val());
-      if (!remoteState.employees || !remoteState.routes) return;
-      // Safety: don't accept remote state with fewer assignments (possible data loss)
-      const remoteAssignments = (remoteState.assignments || []).length;
-      const localAssignments = (state.assignments || []).length;
-      if (remoteAssignments === 0 && localAssignments > 5) {
-        console.warn("Firebase received empty assignments while local has data. Ignoring to prevent data loss.");
-        return;
-      }
-      // Preserve local session (session is per-device, not synced)
-      const localSession = { ...state.session };
-      state = remoteState;
-      state.session = localSession;
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-      render();
-      showSyncStatus("synced", "已同步其他使用者的變更");
-    });
-  } catch (err) {
-    console.warn("Firebase init failed, using localStorage only:", err);
-    firebaseReady = false;
-    hideLoading();
-    showSyncStatus("error", "雲端連線失敗，使用本機資料");
+    employee.active = employee.employmentStatus === "active";
+    if (typeof employee.canCoverShift !== "boolean") {
+      employee.canCoverShift = !!employee.isRelief;
+    }
+  });
+  state.session = state.session || {};
+  state.session.lastGeneratedRange = state.session.lastGeneratedRange || null;
+  state.labelSettings = state.labelSettings || {};
+  state.labelSettings.leaveTypes = {
+    annual: "特休", personal: "事假", sick: "病假",
+    official: "公假", injury: "公傷", other: "其他",
+    ...(state.labelSettings.leaveTypes || {}),
+  };
+  if (!state.pinSettings) {
+    state.pinSettings = { teamLeader: "1234", adminStaff: "1234", supervisor: "0000", individual: {} };
   }
+  if (!state.pinSettings.individual) {
+    state.pinSettings.individual = {};
+  }
+  if (!state.mileageTable) {
+    state.mileageTable = buildInitialState().mileageTable;
+  }
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  render();
+}
+
+function startFirebaseListener() {
+  stateRef.on("value", (snap) => {
+    if (Date.now() - lastFirebaseSaveTime < FIREBASE_ECHO_DELAY) return;
+    if (!snap.exists()) return;
+    const remoteState = ensureArrays(snap.val());
+    if (!remoteState.employees || !remoteState.routes) return;
+    // Safety: don't accept remote state with zero assignments when local has data
+    const remoteAssignments = (remoteState.assignments || []).length;
+    const localAssignments = (state.assignments || []).length;
+    if (remoteAssignments === 0 && localAssignments > 5) {
+      console.warn("Firebase received empty assignments while local has data. Ignoring to prevent data loss.");
+      return;
+    }
+    const localSession = { ...state.session };
+    state = remoteState;
+    state.session = localSession;
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    render();
+  });
+}
+
+async function attemptFirebaseInit() {
+  const snapshot = await stateRef.once("value");
+  if (snapshot.exists()) {
+    const firebaseState = ensureArrays(snapshot.val());
+    if (firebaseState.employees && firebaseState.routes && firebaseState.assignments) {
+      applyFirebaseState(firebaseState);
+    }
+  } else {
+    // First time: upload local state to Firebase (exclude session)
+    const syncData = { ...state };
+    delete syncData.session;
+    await stateRef.set(syncData);
+  }
+  lastFirebaseSaveTime = Date.now();
+  firebaseReady = true;
+  firebaseInitialized = true;
+  hideLoading();
+  startFirebaseListener();
+}
+
+(async function initFirebase() {
+  const MAX_RETRIES = 3;
+  const RETRY_DELAY = 2000; // 2 seconds between retries
+
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      await attemptFirebaseInit();
+      return; // Success, exit
+    } catch (err) {
+      console.warn(`Firebase init attempt ${attempt}/${MAX_RETRIES} failed:`, err);
+      if (attempt < MAX_RETRIES) {
+        await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY));
+      }
+    }
+  }
+  // All retries failed
+  console.warn("Firebase init failed after all retries, using localStorage only.");
+  firebaseReady = false;
+  hideLoading();
+  showSyncStatus("error", "雲端連線失敗，使用本機資料（將自動重試）");
+  // Keep trying in background every 10 seconds
+  const bgRetry = setInterval(async () => {
+    try {
+      await attemptFirebaseInit();
+      clearInterval(bgRetry);
+      showSyncStatus("synced", "雲端連線恢復");
+    } catch (e) { /* keep retrying silently */ }
+  }, 10000);
 })();
 
 
