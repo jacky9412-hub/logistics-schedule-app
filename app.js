@@ -2538,9 +2538,17 @@ function renderDataManagementPanel(currentUser) {
 
 function renderAuditPanel() {
   const section = createSection("異動紀錄總覽", "主管可追溯固定班表生成、請假、代班與主資料調整。");
+  const totalLogs = state.auditLogs.length;
+
+  const details = document.createElement("details");
+  details.className = "collapsible-list";
+  const summary = document.createElement("summary");
+  summary.textContent = `查看異動紀錄（共 ${totalLogs} 筆）`;
+  details.appendChild(summary);
+
   const timeline = document.createElement("div");
   timeline.className = "timeline";
-  state.auditLogs.slice(0, 12).forEach((log) => {
+  state.auditLogs.slice(0, 30).forEach((log) => {
     const actor = getEmployeeById(log.actorId);
     const item = document.createElement("article");
     item.className = "timeline-item";
@@ -2551,7 +2559,16 @@ function renderAuditPanel() {
     `;
     timeline.appendChild(item);
   });
-  section.appendChild(timeline);
+  if (totalLogs > 30) {
+    const moreNote = document.createElement("p");
+    moreNote.className = "muted";
+    moreNote.style.textAlign = "center";
+    moreNote.style.padding = "12px";
+    moreNote.textContent = `僅顯示最近 30 筆，共 ${totalLogs} 筆紀錄`;
+    timeline.appendChild(moreNote);
+  }
+  details.appendChild(timeline);
+  section.appendChild(details);
   return section;
 }
 function render() {
