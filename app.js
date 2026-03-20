@@ -2926,7 +2926,25 @@ function startFirebaseListener() {
   });
 }
 
+async function waitForFirebaseConnection(timeoutMs = 10000) {
+  return new Promise((resolve, reject) => {
+    const connRef = firebaseDb.ref(".info/connected");
+    const timer = setTimeout(() => {
+      connRef.off();
+      reject(new Error("Firebase connection timeout after " + timeoutMs + "ms"));
+    }, timeoutMs);
+    connRef.on("value", (snap) => {
+      if (snap.val() === true) {
+        clearTimeout(timer);
+        connRef.off();
+        resolve();
+      }
+    });
+  });
+}
+
 async function attemptFirebaseInit() {
+  await waitForFirebaseConnection();
   const snapshot = await stateRef.once("value");
   if (snapshot.exists()) {
     const firebaseState = ensureArrays(snapshot.val());
@@ -2948,7 +2966,7 @@ async function attemptFirebaseInit() {
 
 (async function initFirebase() {
   const MAX_RETRIES = 3;
-  const RETRY_DELAY = 2000; // 2 seconds between retries
+  const RETRY_DELAY = 3000; // 3 seconds between retries
 
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     try {
