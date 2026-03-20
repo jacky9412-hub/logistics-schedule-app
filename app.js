@@ -362,6 +362,44 @@ function buildInitialState() {
     employees,
     routes,
     assignments,
+    mileageTable: [
+      { id: 1, name: "中區段(晚班)", am: "X", pm: 36, total: 36, note: "" },
+      { id: 2, name: "軍功段", am: 21, pm: 28, total: 49, note: "" },
+      { id: 3, name: "南屯段", am: 13, pm: 34, total: 47, note: "" },
+      { id: 4, name: "市政段", am: 14, pm: 39, total: 53, note: "" },
+      { id: 5, name: "黎明段", am: 25, pm: 32, total: 57, note: "" },
+      { id: 6, name: "松竹段", am: 30, pm: 36, total: 66, note: "" },
+      { id: 7, name: "中工段", am: 29, pm: 52, total: 81, note: "" },
+      { id: 8, name: "中港段", am: 25, pm: 27, total: 52, note: "" },
+      { id: 9, name: "文心段", am: 17, pm: 24, total: 41, note: "" },
+      { id: 10, name: "大雅段", am: 27, pm: 39, total: 66, note: "" },
+      { id: 11, name: "太平段", am: 20, pm: 25, total: 45, note: "" },
+      { id: 12, name: "大里段", am: 32, pm: 32, total: 64, note: "" },
+      { id: 13, name: "東勢段", am: 44, pm: 50, total: 94, note: "" },
+      { id: 14, name: "后里段", am: 42, pm: 46, total: 88, note: "" },
+      { id: 15, name: "清水段", am: 39, pm: 38, total: 77, note: "" },
+      { id: 16, name: "沙鹿段", am: 35, pm: 35, total: 70, note: "" },
+      { id: 17, name: "梧棲段(半日)", am: "X", pm: 67, total: 67, note: "" },
+      { id: 18, name: "玉山大雅(半日)", am: "X", pm: 43, total: 43, note: "" },
+      { id: 19, name: "玉山南屯(晚班)", am: "X", pm: 30, total: 30, note: "" },
+      { id: 20, name: "市政二段(晚班)", am: "X", pm: 38, total: 38, note: "" },
+      { id: 21, name: "南區段(晚班)", am: "X", pm: 28, total: 28, note: "" },
+      { id: 22, name: "彰化段", am: 48, pm: 55, total: 103, note: "" },
+      { id: 23, name: "和美段", am: 53, pm: 44, total: 97, note: "" },
+      { id: 24, name: "員林段", am: 37, pm: 13, total: 50, note: "" },
+      { id: 25, name: "溪湖段", am: 18, pm: 26, total: 44, note: "" },
+      { id: 26, name: "頭份段", am: 31, pm: 30, total: 61, note: "" },
+      { id: 27, name: "竹南段", am: 30, pm: 31, total: 61, note: "" },
+      { id: 28, name: "草屯段", am: 53, pm: 35, total: 88, note: "" },
+      { id: 29, name: "竹山段", am: "X", pm: "X", total: 116, note: "公務機車" },
+      { id: 30, name: "南投段(半日)", am: "X", pm: 70, total: 70, note: "" },
+      { id: 31, name: "西螺段", am: 39, pm: 39, total: 78, note: "" },
+      { id: 32, name: "北港段", am: 52, pm: 52, total: 104, note: "" },
+      { id: 33, name: "虎尾段", am: 32, pm: 33, total: 65, note: "" },
+      { id: 34, name: "中埔段", am: 31, pm: 35, total: 66, note: "" },
+      { id: 35, name: "朴子段", am: 39, pm: 37, total: 76, note: "" },
+      { id: 36, name: "新港段", am: 31, pm: 31, total: 62, note: "" },
+    ],
     auditLogs: [
       {
         id: makeId("log"),
@@ -417,6 +455,9 @@ function loadState() {
     }
     if (!parsed.pinSettings.individual) {
       parsed.pinSettings.individual = {};
+    }
+    if (!parsed.mileageTable) {
+      parsed.mileageTable = buildInitialState().mileageTable;
     }
     return parsed;
   } catch (error) {
@@ -966,6 +1007,14 @@ function renderEmployeeHome(currentUser) {
   todayBody.append(highlight, profile);
   todaySection.appendChild(todayBody);
 
+  // 機車上下午里程查核表按鈕
+  const mileageBtn = document.createElement("button");
+  mileageBtn.className = "secondary";
+  mileageBtn.textContent = "機車上下午里程查核表";
+  mileageBtn.style.cssText = "margin-top:12px;width:100%;";
+  mileageBtn.addEventListener("click", () => openMileageTableWindow());
+  todaySection.appendChild(mileageBtn);
+
   const upcomingSection = createSection("我的近期班表", "顯示未來 10 筆班表，包含固定配置與異動覆蓋。");
   const upcomingAssignments = getAssignmentsForEmployee(currentUser.id)
     .filter((assignment) => assignment.date >= getToday())
@@ -1367,6 +1416,150 @@ function openDailyBoardWindow() {
   popup.document.close();
   popup.focus();
 }
+function openMileageTableWindow() {
+  const canEdit = ["teamLeader", "adminStaff", "supervisor"].includes(state.session.role);
+  const data = state.mileageTable || [];
+  const rows = data.map((item) => {
+    const amClass = item.am === "X" ? ' class="na-cell"' : "";
+    const pmClass = item.pm === "X" ? ' class="na-cell"' : "";
+    const amVal = item.am === "X" ? "X" : item.am;
+    const pmVal = item.pm === "X" ? "X" : item.pm;
+    return `
+      <tr>
+        <td class="center">${item.id}</td>
+        <td class="route-name">${item.name}</td>
+        <td${amClass}${canEdit && item.am !== "X" ? ` class="editable" data-id="${item.id}" data-field="am"` : ""}>${amVal}</td>
+        <td${pmClass}${canEdit && item.pm !== "X" ? ` class="editable" data-id="${item.id}" data-field="pm"` : ""}>${pmVal}</td>
+        <td class="total-cell">${item.total}</td>
+        <td class="note-cell"${canEdit ? ` data-id="${item.id}" data-field="note"` : ""}>${item.note || ""}</td>
+      </tr>
+    `;
+  }).join("");
+
+  const popup = window.open("", "mileage-table", "width=800,height=900,scrollbars=yes,resizable=yes");
+  if (!popup) { window.alert("請先允許瀏覽器開啟彈出視窗。"); return; }
+
+  popup.document.open();
+  popup.document.write(`
+    <!DOCTYPE html>
+    <html lang="zh-Hant">
+    <head>
+      <meta charset="UTF-8">
+      <title>機車上下午里程查核表</title>
+      <style>
+        body { font-family: "Segoe UI", "Noto Sans TC", sans-serif; margin: 0; padding: 24px; background: #f6f1e8; color: #2f2418; }
+        h1 { margin: 0 0 4px; font-size: 1.3rem; }
+        .subtitle { margin: 0 0 16px; color: #6f6254; font-size: 0.9rem; }
+        .edit-hint { margin: 0 0 16px; padding: 8px 12px; background: #fff0e8; border-radius: 10px; color: #a0401a; font-size: 0.85rem; font-weight: 600; }
+        table { width: 100%; border-collapse: collapse; background: #fffdf9; }
+        th, td { border: 1px solid #eadfd0; padding: 8px 10px; text-align: center; vertical-align: middle; font-size: 0.9rem; }
+        th { background: #f1e3d1; font-weight: 700; white-space: nowrap; }
+        .route-name { text-align: left; font-weight: 600; white-space: nowrap; }
+        .na-cell { color: #b0a090; }
+        .total-cell { font-weight: 700; background: #fff8ef; }
+        .note-cell { text-align: left; font-size: 0.85rem; color: #6f6254; }
+        .center { text-align: center; }
+        .editable { cursor: pointer; position: relative; }
+        .editable:hover { background: #ffecd6; }
+        .edit-input { width: 50px; padding: 4px; border: 2px solid #bf5b2c; border-radius: 6px; text-align: center; font-size: 0.9rem; outline: none; }
+        .note-input { width: 100%; padding: 4px; border: 2px solid #bf5b2c; border-radius: 6px; font-size: 0.85rem; outline: none; }
+        .save-msg { position: fixed; bottom: 20px; right: 20px; background: #1d6b63; color: #fff; padding: 10px 18px; border-radius: 10px; font-weight: 600; opacity: 0; transition: opacity 0.3s; z-index: 99; }
+        .save-msg.show { opacity: 1; }
+        @media print {
+          body { padding: 8px; background: #fff; }
+          .edit-hint { display: none; }
+          .editable:hover { background: none; }
+          th, td { padding: 4px 6px; font-size: 10px; }
+        }
+      </style>
+    </head>
+    <body>
+      <h1>台中辦事處 機車上、下午里程查核表</h1>
+      <p class="subtitle">共 ${data.length} 條路線${canEdit ? "（點擊數字可編輯）" : ""}</p>
+      ${canEdit ? '<p class="edit-hint">點擊里程數字或備註即可直接編輯，修改後自動儲存同步。</p>' : ""}
+      <table>
+        <thead>
+          <tr>
+            <th style="width:40px;">編號</th>
+            <th>路線名稱</th>
+            <th style="width:75px;">上午里程</th>
+            <th style="width:75px;">下午里程</th>
+            <th style="width:75px;">總里程</th>
+            <th>備註</th>
+          </tr>
+        </thead>
+        <tbody id="mileageBody">${rows}</tbody>
+      </table>
+      <div class="save-msg" id="saveMsg">已儲存</div>
+      ${canEdit ? `
+      <script>
+        var saveTimeout;
+        function showSaved() {
+          var msg = document.getElementById("saveMsg");
+          msg.classList.add("show");
+          clearTimeout(saveTimeout);
+          saveTimeout = setTimeout(function() { msg.classList.remove("show"); }, 1500);
+        }
+        document.getElementById("mileageBody").addEventListener("click", function(e) {
+          var td = e.target.closest("td");
+          if (!td || !td.classList.contains("editable") && !td.hasAttribute("data-field")) return;
+          if (td.querySelector("input")) return;
+          var field = td.getAttribute("data-field") || td.dataset.field;
+          var id = parseInt(td.getAttribute("data-id") || td.dataset.id);
+          if (!field) return;
+          var oldVal = td.textContent.trim();
+          var isNote = (field === "note");
+          var input = document.createElement("input");
+          input.className = isNote ? "note-input" : "edit-input";
+          input.type = isNote ? "text" : "number";
+          input.value = oldVal;
+          if (!isNote) { input.min = "0"; input.step = "1"; }
+          td.textContent = "";
+          td.appendChild(input);
+          input.focus();
+          input.select();
+          function save() {
+            var newVal = isNote ? input.value.trim() : (parseInt(input.value) || 0);
+            td.textContent = isNote ? newVal : newVal;
+            if (window.opener && window.opener.updateMileageItem) {
+              window.opener.updateMileageItem(id, field, newVal);
+              showSaved();
+              // Refresh total
+              if (!isNote) {
+                var row = td.closest("tr");
+                var cells = row.querySelectorAll("td");
+                var amText = cells[2].textContent.trim();
+                var pmText = cells[3].textContent.trim();
+                var am = (amText === "X") ? 0 : parseInt(amText) || 0;
+                var pm = (pmText === "X") ? 0 : parseInt(pmText) || 0;
+                var total = am + pm;
+                cells[4].textContent = total;
+                window.opener.updateMileageItem(id, "total", total);
+              }
+            }
+          }
+          input.addEventListener("blur", save);
+          input.addEventListener("keydown", function(ev) { if (ev.key === "Enter") { input.blur(); } });
+        });
+      </script>
+      ` : ""}
+    </body>
+    </html>
+  `);
+  popup.document.close();
+  popup.focus();
+}
+
+// Global callback for mileage popup to update state
+window.updateMileageItem = function(id, field, value) {
+  if (!state.mileageTable) return;
+  const item = state.mileageTable.find((m) => m.id === id);
+  if (item) {
+    item[field] = value;
+    saveState();
+  }
+};
+
 function openLeaveSummaryWindow(startDate, endDate) {
   const allDates = enumerateDates(startDate, endDate).filter((d) => !isHoliday(d));
   const leaveAssignments = state.assignments
