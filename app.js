@@ -559,9 +559,11 @@ const userSelect = document.querySelector("#userSelect");
 const roleHint = document.querySelector("#roleHint");
 const statCardTemplate = document.querySelector("#statCardTemplate");
 
+let firebaseInitialized = false; // true after first Firebase load completes
+
 function saveState() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  if (firebaseReady) {
+  if (firebaseReady && firebaseInitialized) {
     lastFirebaseSaveTime = Date.now();
     // Only sync non-session data to Firebase (session is per-device)
     const syncData = { ...state };
@@ -2915,6 +2917,7 @@ render();
     lastFirebaseSaveTime = Date.now(); // Prevent initial listener echo
 
     firebaseReady = true;
+    firebaseInitialized = true; // Now it's safe to write to Firebase
     hideLoading();
 
     // Real-time listener for other users' changes
@@ -2924,6 +2927,13 @@ render();
       if (!snap.exists()) return;
       const remoteState = ensureArrays(snap.val());
       if (!remoteState.employees || !remoteState.routes) return;
+      // Safety: don't accept remote state with fewer assignments (possible data loss)
+      const remoteAssignments = (remoteState.assignments || []).length;
+      const localAssignments = (state.assignments || []).length;
+      if (remoteAssignments === 0 && localAssignments > 5) {
+        console.warn("Firebase received empty assignments while local has data. Ignoring to prevent data loss.");
+        return;
+      }
       // Preserve local session (session is per-device, not synced)
       const localSession = { ...state.session };
       state = remoteState;
