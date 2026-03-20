@@ -417,6 +417,89 @@ tr:last-child td {
   border-radius: 0;
 }
 
+/* PIN dialog */
+.pin-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  backdrop-filter: blur(3px);
+}
+
+.pin-dialog {
+  background: var(--surface-strong);
+  border-radius: 18px;
+  padding: 28px 24px 20px;
+  width: min(320px, 90vw);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.25);
+  text-align: center;
+}
+
+.pin-title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text);
+  margin: 0 0 16px;
+}
+
+.pin-input {
+  width: 100%;
+  padding: 12px 14px;
+  font-size: 1.4rem;
+  text-align: center;
+  letter-spacing: 6px;
+  border: 2px solid var(--border);
+  border-radius: 12px;
+  background: #fff;
+  color: var(--text);
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.pin-input:focus {
+  border-color: var(--brand);
+}
+
+.pin-error {
+  color: var(--warn);
+  font-size: 0.85rem;
+  margin-top: 8px;
+}
+
+.pin-buttons {
+  display: flex;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.pin-buttons button {
+  flex: 1;
+  padding: 10px;
+  border: none;
+  border-radius: 12px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+
+.pin-buttons button:hover {
+  opacity: 0.85;
+}
+
+.pin-cancel {
+  background: var(--border);
+  color: var(--muted);
+}
+
+.pin-confirm {
+  background: var(--brand);
+  color: #fff;
+}
+
 .master-card .form-grid,
 .master-card .mini-grid {
   margin: 0;

@@ -441,10 +441,50 @@ function getEmployeePin(employeeId) {
   return emp ? (state.pinSettings[emp.role] || "") : "";
 }
 
-function requirePin(role) {
+function showPinDialog(title) {
+  return new Promise((resolve) => {
+    const overlay = document.createElement("div");
+    overlay.className = "pin-overlay";
+    const dialog = document.createElement("div");
+    dialog.className = "pin-dialog";
+    dialog.innerHTML = `
+      <p class="pin-title">${title}</p>
+      <input type="password" class="pin-input" maxlength="8" placeholder="請輸入 PIN 碼" autocomplete="off">
+      <div class="pin-error" style="display:none">PIN 碼錯誤</div>
+      <div class="pin-buttons">
+        <button type="button" class="pin-cancel">取消</button>
+        <button type="button" class="pin-confirm">確認</button>
+      </div>
+    `;
+    overlay.appendChild(dialog);
+    document.body.appendChild(overlay);
+
+    const input = dialog.querySelector(".pin-input");
+    const errorMsg = dialog.querySelector(".pin-error");
+    const confirmBtn = dialog.querySelector(".pin-confirm");
+    const cancelBtn = dialog.querySelector(".pin-cancel");
+
+    setTimeout(() => input.focus(), 50);
+
+    function cleanup(result) {
+      overlay.remove();
+      resolve(result);
+    }
+
+    confirmBtn.addEventListener("click", () => cleanup(input.value));
+    cancelBtn.addEventListener("click", () => cleanup(null));
+    overlay.addEventListener("click", (e) => { if (e.target === overlay) cleanup(null); });
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") cleanup(input.value);
+      if (e.key === "Escape") cleanup(null);
+    });
+  });
+}
+
+async function requirePin(role) {
   if (!protectedRoles.includes(role)) return true;
   if (authenticatedRoles.has(role)) return true;
-  const pin = window.prompt(`請輸入「${roleLabels[role]}」的 PIN 碼：`);
+  const pin = await showPinDialog(`請輸入「${roleLabels[role]}」的 PIN 碼`);
   if (pin === null) return false;
   if (pin === state.pinSettings[role]) {
     authenticatedRoles.add(role);
@@ -454,18 +494,18 @@ function requirePin(role) {
   return false;
 }
 
-function requireUserPin(employeeId) {
+async function requireUserPin(employeeId) {
   if (!employeeId) return false;
   if (authenticatedUsers.has(employeeId)) return true;
   const emp = getEmployeeById(employeeId);
   if (!emp || !protectedRoles.includes(emp.role)) return true;
   const correctPin = getEmployeePin(employeeId);
-  if (!correctPin) return true; // No PIN set, allow access
-  const pin = window.prompt(`請輸入「${emp.name}」的個人 PIN 碼：`);
+  if (!correctPin) return true;
+  const pin = await showPinDialog(`請輸入「${emp.name}」的個人 PIN 碼`);
   if (pin === null) return false;
   if (pin === correctPin) {
     authenticatedUsers.add(employeeId);
-    authenticatedRoles.add(emp.role); // Also mark role as authenticated
+    authenticatedRoles.add(emp.role);
     return true;
   }
   window.alert("PIN 碼錯誤，無法切換至此帳號。");
@@ -2550,7 +2590,7 @@ function render() {
   }
 }
 
-roleSelect.addEventListener("change", (event) => {
+roleSelect.addEventListener("change", async (event) => {
   const rawValue = event.target.value;
   let newRole, targetUserId;
 
@@ -2566,12 +2606,11 @@ roleSelect.addEventListener("change", (event) => {
 
   // Verify PIN for the specific user
   if (protectedRoles.includes(newRole) && targetUserId) {
-    if (!requireUserPin(targetUserId)) {
-      // Revert to previous selection
+    if (!(await requireUserPin(targetUserId))) {
       syncSelectors();
       return;
     }
-  } else if (!requirePin(newRole)) {
+  } else if (!(await requirePin(newRole))) {
     syncSelectors();
     return;
   }
@@ -2582,11 +2621,11 @@ roleSelect.addEventListener("change", (event) => {
   render();
 });
 
-userSelect.addEventListener("change", (event) => {
+userSelect.addEventListener("change", async (event) => {
   const newUserId = event.target.value;
   // If switching to a different user in a protected role, verify their PIN
   if (protectedRoles.includes(state.session.role) && !authenticatedUsers.has(newUserId)) {
-    if (!requireUserPin(newUserId)) {
+    if (!(await requireUserPin(newUserId))) {
       event.target.value = state.session.userId; // Revert
       return;
     }
