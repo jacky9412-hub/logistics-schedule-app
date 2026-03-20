@@ -1387,6 +1387,16 @@ function openLeaveSummaryWindow(startDate, endDate) {
 
   const uniqueEmployees = new Set(leaveAssignments.map((a) => a.employeeId));
 
+  // 統計各假別人次
+  const leaveTypeCounts = {};
+  leaveAssignments.forEach((a) => {
+    const label = getLabel("leaveTypes", a.leaveType);
+    leaveTypeCounts[label] = (leaveTypeCounts[label] || 0) + 1;
+  });
+  const leaveTypeSpans = Object.entries(leaveTypeCounts)
+    .map(([label, count]) => `<span>${label} ${count} 人次</span>`)
+    .join("");
+
   let detailRows = "";
   for (const [date, assignments] of dateGroups) {
     assignments.forEach((a, idx) => {
@@ -1440,6 +1450,7 @@ function openLeaveSummaryWindow(startDate, endDate) {
         <span>涉及員工 ${uniqueEmployees.size} 人</span>
         <span>涵蓋工作日 ${allDates.length} 天</span>
         <span>有休假的天數 ${dateGroups.size} 天</span>
+        ${leaveTypeSpans}
       </div>
       <table>
         <thead>
