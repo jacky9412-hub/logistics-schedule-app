@@ -1546,12 +1546,13 @@ function openRangeBoardWindow(startDate, endDate) {
         .filter-bar { margin-bottom: 18px; }
         .filter-bar label { cursor: pointer; font-weight: 600; user-select: none; }
         .filter-bar input { margin-right: 6px; transform: scale(1.2); }
-        .board-wrap { overflow: auto; border: 1px solid #eadfd0; background: #fffdf9; }
+        .board-wrap { overflow: auto; border: 1px solid #eadfd0; background: #fffdf9; max-height: calc(100vh - 160px); }
         table { border-collapse: collapse; width: 100%; table-layout: fixed; }
         th, td { border-bottom: 1px solid #eadfd0; border-right: 1px solid #f0e5d7; padding: 6px 6px; text-align: left; vertical-align: top; }
         thead th { position: sticky; top: 0; background: #f1e3d1; z-index: 2; min-width: 70px; font-size: 12px; }
         thead th small { display: block; color: #6f6254; margin-top: 4px; }
         .sticky-name { position: sticky; left: 0; background: #fff8ef; z-index: 1; min-width: 90px; width: 90px; }
+        thead th.sticky-name { z-index: 3; }
         .sticky-name small { display: block; color: #6f6254; margin-top: 4px; }
         .override-cell { background: #fff0e8; }
         .merged-cell { background: #fce8f0; }
