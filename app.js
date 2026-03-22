@@ -102,7 +102,7 @@ function renderCompanyHolidayList() {
 const roleLabels = {
   operator: "運務員",
   teamLeader: "組長",
-  reliefStaff: "備員",
+  reliefStaff: "抵休",
   adminStaff: "行政",
   supervisor: "主管",
 };
@@ -310,6 +310,10 @@ function buildInitialState() {
     })),
   ];
 
+  // 林x熙 is 軍功段 owner but also serves as 抵休 (relief staff)
+  const linXixi = employees.find((e) => e.name === "林x熙");
+  if (linXixi) { linXixi.role = "reliefStaff"; linXixi.isRelief = true; linXixi.canCoverShift = true; }
+
   const companySettings = {
     weekendDaysOff: true,
     holidays: [...taiwanHolidaySeeds2026],
@@ -430,6 +434,18 @@ function buildInitialState() {
   };
 }
 
+function applyEmployeeMigrations(stateObj) {
+  if (!stateObj.employees) return;
+  stateObj.employees.forEach((employee) => {
+    // 林x熙 is 軍功段 owner but also serves as 抵休 (relief staff)
+    if (employee.name === "林x熙") {
+      employee.role = "reliefStaff";
+      employee.isRelief = true;
+      employee.canCoverShift = true;
+    }
+  });
+}
+
 function loadState() {
   const stored = localStorage.getItem(STORAGE_KEY);
   if (!stored) {
@@ -453,6 +469,7 @@ function loadState() {
         employee.canCoverShift = !!employee.isRelief;
       }
     });
+    applyEmployeeMigrations(parsed);
     parsed.session = parsed.session || {};
     parsed.session.lastGeneratedRange = parsed.session.lastGeneratedRange || null;
     parsed.labelSettings = parsed.labelSettings || {};
@@ -719,6 +736,197 @@ function getDisplayAssignment(employee, dateString) {
   return null;
 }
 
+// ── Monthly Export Constants & Data Builder ──────────────────────────────
+
+const EXPORT_URBAN_ROUTES = [
+  "南屯段", "市政段", "黎明段", "中港段", "中工段",
+  "松竹段", "文心段", "大雅段", "太平段", "大里段",
+];
+
+function getEmployeeByName(name) {
+  return state.employees.find((e) => e.name === name && e.employmentStatus === "active");
+}
+
+function getRouteByName(name) {
+  return state.routes.find((r) => r.name === name);
+}
+
+function getRouteOwner(routeName) {
+  const seed = routeSeeds.find((r) => r.name === routeName);
+  return seed ? getEmployeeByName(seed.owner) : null;
+}
+
+function buildMonthlyExportData(startDate, endDate) {
+  const workingDates = getWorkingDates(startDate, endDate, state.companySettings);
+  const startDateObj = new Date(`${startDate}T00:00:00`);
+  const taiwanYear = startDateObj.getFullYear() - 1911;
+  const monthNum = startDateObj.getMonth() + 1;
+
+  // Identify team leaders and relief staff
+  const teamLeaders = [
+    getEmployeeByName("齊x擷"),
+    getEmployeeByName("林x強"),
+  ].filter(Boolean);
+
+  const reliefStaff = [
+    getEmployeeByName("許x佳"),
+    getEmployeeByName("劉x漢"),
+  ].filter(Boolean);
+
+  const militaryRelief = getEmployeeByName("林x熙");
+  const eveningRelief = getEmployeeByName("陳x清");
+
+  // Column headers for display
+  const teamLeaderHeaders = teamLeaders.map((e) => ({
+    label: "組長",
+    name: e.name.replace(/^(.).*?(.)$/, "$1x$2"),
+  }));
+  const reliefHeaders = reliefStaff.map((e) => ({
+    label: "抵休",
+    name: e.name.replace(/^(.).*?(.)$/, "$1x$2"),
+  }));
+  const militaryReliefHeader = {
+    label: "軍功/抵休",
+    name: militaryRelief ? militaryRelief.name.replace(/^(.).*?(.)$/, "$1x$2") : "",
+  };
+  const eveningReliefHeader = {
+    label: "晚班/抵休",
+    name: eveningRelief ? eveningRelief.name.replace(/^(.).*?(.)$/, "$1x$2") : "",
+  };
+
+  // Urban route owners
+  const urbanRouteInfos = EXPORT_URBAN_ROUTES.map((routeName) => {
+    const owner = getRouteOwner(routeName);
+    return {
+      routeName,
+      shortName: routeName.replace("段", ""),
+      owner,
+      ownerShortName: owner ? owner.name.replace(/^(.).*?(.)$/, "$1x$2") : "",
+    };
+  });
+
+  const rows = [];
+  workingDates.forEach((dateStr, idx) => {
+    const dayAssignments = getAssignmentsByDate(dateStr);
+    const allDateAssignments = state.assignments.filter((a) => a.date === dateStr);
+
+    // 休假狀況: collect who is on leave
+    const leaveEntries = allDateAssignments.filter((a) => a.status === "leave");
+    const leaveNames = leaveEntries.map((a) => {
+      const emp = getEmployeeById(a.employeeId);
+      return emp ? emp.name.replace(/^(.).*?(.)$/, "$1x$2") : "";
+    }).filter(Boolean);
+
+    // Helper: get what an employee is doing on this date
+    const getEmployeeAction = (emp) => {
+      if (!emp) return { text: "", color: null };
+      const assignment = getAssignmentByEmployeeDate(emp.id, dateStr);
+      if (!assignment) return { text: "", color: null };
+      if (assignment.status === "leave") {
+        const colorType = (assignment.leaveType === "sick" || assignment.leaveType === "injury") ? "orange" : "green";
+        return { text: "X", color: colorType };
+      }
+      if (assignment.status === "reassigned" || assignment.source === "override") {
+        const route = getRouteById(assignment.routeId);
+        if (route) {
+          const defaultRoute = getDefaultRoute(emp);
+          if (!defaultRoute || route.id !== defaultRoute.id) {
+            let text = route.name;
+            if (assignment.secondaryRouteId) {
+              const secRoute = getRouteById(assignment.secondaryRouteId);
+              if (secRoute) text += `    +${secRoute.name.charAt(0)}`;
+            }
+            return { text, color: "yellow" };
+          }
+        }
+      }
+      return { text: "", color: null };
+    };
+
+    // Team leader columns
+    const teamLeaderCells = teamLeaders.map((tl) => getEmployeeAction(tl));
+
+    // Relief staff columns
+    const reliefCells = reliefStaff.map((rs) => getEmployeeAction(rs));
+
+    // Military relief (林x熙)
+    const militaryCell = getEmployeeAction(militaryRelief);
+
+    // Evening relief (陳x清)
+    const eveningCell = getEmployeeAction(eveningRelief);
+
+    // Urban route columns
+    const urbanCells = urbanRouteInfos.map((info) => {
+      if (!info.owner) return { text: "", color: null };
+      const assignment = getAssignmentByEmployeeDate(info.owner.id, dateStr);
+      if (!assignment) return { text: "", color: null };
+
+      if (assignment.status === "leave") {
+        const colorType = (assignment.leaveType === "sick" || assignment.leaveType === "injury") ? "orange" : "green";
+        return { text: "X", color: colorType };
+      }
+
+      // Check if owner is doing something else (reassigned away)
+      if (assignment.source === "override" || assignment.status === "reassigned") {
+        const route = getRouteById(assignment.routeId);
+        const defaultRoute = getDefaultRoute(info.owner);
+        if (route && defaultRoute && route.id !== defaultRoute.id) {
+          return { text: route.name, color: "yellow" };
+        }
+      }
+
+      // Check if someone is covering this route (find assignment with this routeId from someone else)
+      const coverer = allDateAssignments.find((a) => {
+        if (a.employeeId === info.owner.id) return false;
+        const r = getRouteById(a.routeId);
+        return r && r.name === info.routeName;
+      });
+      if (coverer) {
+        const covEmp = getEmployeeById(coverer.employeeId);
+        if (covEmp) {
+          // Show covering employee's short name
+          return { text: covEmp.name.replace(/^(.).*?(.)$/, "$1x$2"), color: "lightblue" };
+        }
+      }
+
+      return { text: "", color: null };
+    });
+
+    const dateObj = new Date(`${dateStr}T00:00:00`);
+    const dateDisplay = `${dateObj.getMonth() + 1}/${dateObj.getDate()}`;
+    const weekday = ["日", "一", "二", "三", "四", "五", "六"][dateObj.getDay()];
+
+    rows.push({
+      workDay: idx + 1,
+      date: `${dateDisplay}(${weekday})`,
+      dateRaw: dateStr,
+      leaveNames,
+      teamLeaderCells,
+      reliefCells,
+      militaryCell,
+      eveningCell,
+      urbanCells,
+    });
+  });
+
+  // 值班組長：單數月=齊x擷，雙數月=林x強
+  const dutyLeader = monthNum % 2 === 1 ? "齊x擷" : "林x強";
+  const today = new Date();
+  const todayTaiwanYear = today.getFullYear() - 1911;
+  const updateDate = `${todayTaiwanYear}.${String(today.getMonth() + 1).padStart(2, "0")}.${String(today.getDate()).padStart(2, "0")}`;
+
+  return {
+    title: `${taiwanYear}年${monthNum}月`,
+    subtitle: `台中辦事處  抵休代班 、 學線  排程表     值班組長：${dutyLeader}   更新日期：${updateDate}`,
+    teamLeaderHeaders,
+    reliefHeaders,
+    militaryReliefHeader,
+    eveningReliefHeader,
+    urbanRouteInfos,
+    rows,
+  };
+}
+
 function logAction({ actorId, action, targetType, targetId, summary, detail }) {
   state.auditLogs.unshift({
     id: makeId("log"),
@@ -758,7 +966,7 @@ function employeeOptions({ includeAll = true, includeReliefOnly = false } = {}) 
     .sort(compareEmployeesByScheduleOrder)
     .map((employee) => {
       const tags = [roleLabels[employee.role]];
-      if (employee.isRelief) tags.push("備員");
+      if (employee.isRelief) tags.push("抵休");
       if (!employee.isRelief && employee.canCoverShift) tags.push("可支援代班");
       return `<option value="${employee.id}">${employee.name} | ${tags.join(" | ")}</option>`;
     })
@@ -787,7 +995,7 @@ function describeAssignment(assignment) {
 
 function buildRoleHint(role) {
   if (role === "operator") return "運務員可查看自己的今日班別、路線與假別資訊。";
-  if (role === "reliefStaff") return "備員平常不綁固定路線，主要在異動時支援代班。";
+  if (role === "reliefStaff") return "抵休平常不綁固定路線，主要在異動時支援代班。";
   if (role === "teamLeader") return "組長可生成固定班表、登記請假並安排代班。";
   if (role === "adminStaff") return "行政可維護員工、路線、核定里程與公司休假日。";
   return "主管可查看全體班表、異動紀錄並進行全權編修。";
@@ -840,7 +1048,7 @@ function renderPrototypeNotice() {
     <div class="tag-row">
       <span class="tag">員工 ${state.employees.filter((e) => e.employmentStatus === "active").length} 人</span>
       <span class="tag">路線 ${state.routes.length} 條</span>
-      <span class="tag">備員 ${state.employees.filter((e) => e.role === "reliefStaff" && e.employmentStatus === "active").length} 人</span>
+      <span class="tag">抵休 ${state.employees.filter((e) => e.role === "reliefStaff" && e.employmentStatus === "active").length} 人</span>
       <span class="tag">固定配置 + 異動覆蓋</span>
     </div>
   `;
@@ -886,6 +1094,10 @@ function renderManagementLaunchers() {
         <button type="submit">查看選擇區間班表</button>
         <button type="button" class="secondary" id="openLeaveSummaryButton">查看休假總表</button>
       </div>
+      <div class="action-row" style="margin-top:8px;">
+        <button type="button" class="secondary" id="exportMonthlyPrintBtn">📋 匯出排班表 (列印)</button>
+        <button type="button" class="secondary" id="exportMonthlyExcelBtn">📊 匯出排班表 (Excel)</button>
+      </div>
     </form>
   `;
   section.querySelector("#openDailyBoardTopButton").addEventListener("click", () => {
@@ -905,6 +1117,20 @@ function renderManagementLaunchers() {
     const e = form.elements.endDate.value;
     if (!s || !e || s > e) { window.alert("請確認日期區間正確。"); return; }
     openLeaveSummaryWindow(s, e);
+  });
+  section.querySelector("#exportMonthlyPrintBtn").addEventListener("click", () => {
+    const form = section.querySelector("#rangeBoardForm");
+    const s = form.elements.startDate.value;
+    const e = form.elements.endDate.value;
+    if (!s || !e || s > e) { window.alert("請確認日期區間正確。"); return; }
+    openMonthlySchedulePrintWindow(s, e);
+  });
+  section.querySelector("#exportMonthlyExcelBtn").addEventListener("click", () => {
+    const form = section.querySelector("#rangeBoardForm");
+    const s = form.elements.startDate.value;
+    const e = form.elements.endDate.value;
+    if (!s || !e || s > e) { window.alert("請確認日期區間正確。"); return; }
+    exportMonthlyScheduleExcel(s, e);
   });
   return section;
 }
@@ -1003,7 +1229,7 @@ function renderEmployeeHome(currentUser) {
     <div class="tag-row">
       <span class="tag">${roleLabels[currentUser.role]}</span>
       <span class="tag">${getLabel("shifts", currentUser.shift)}</span>
-      ${currentUser.isRelief ? `<span class="tag">備員</span>` : ""}
+      ${currentUser.isRelief ? `<span class="tag">抵休</span>` : ""}
       ${currentUser.canCoverShift && !currentUser.isRelief ? `<span class="tag">可支援代班</span>` : ""}
       ${currentUser.isNightOwner ? `<span class="tag">固定大夜班</span>` : ""}
     </div>
@@ -1680,6 +1906,227 @@ function openLeaveSummaryWindow(startDate, endDate) {
   popup.focus();
 }
 
+// ── Monthly Schedule Export (Print + Excel) ──────────────────────────────
+
+function openMonthlySchedulePrintWindow(startDate, endDate) {
+  const data = buildMonthlyExportData(startDate, endDate);
+  const popup = window.open("", `monthly-schedule-${startDate}-${endDate}`, "width=1600,height=900,scrollbars=yes,resizable=yes");
+  if (!popup) { window.alert("請先允許瀏覽器開啟彈出視窗。"); return; }
+
+  const totalCols = 3 + data.teamLeaderHeaders.length + data.reliefHeaders.length + 1 + 1 + data.urbanRouteInfos.length;
+
+  const colorMap = { green: "#92D050", yellow: "#FFFF00", orange: "#FFC000", lightblue: "#B4D8E7" };
+  const cellStyle = (cell) => cell.color ? `background:${colorMap[cell.color]};-webkit-print-color-adjust:exact;print-color-adjust:exact;` : "";
+
+  // Build header row 2 (group headers)
+  let headerRow2 = `<th rowspan="2" style="width:40px;">工作天</th><th rowspan="2" style="width:70px;">日期</th><th rowspan="2" style="min-width:100px;">休假狀況</th>`;
+  if (data.teamLeaderHeaders.length) headerRow2 += `<th colspan="${data.teamLeaderHeaders.length}" style="background:#00B0F0;color:#fff;">組長</th>`;
+  if (data.reliefHeaders.length) headerRow2 += `<th colspan="${data.reliefHeaders.length}" style="background:#FFFF00;">抵休</th>`;
+  headerRow2 += `<th style="background:#FFFF00;color:red;">軍功/抵休</th>`;
+  headerRow2 += `<th style="background:#FFFF00;color:red;">晚班/抵休</th>`;
+  data.urbanRouteInfos.forEach((info) => { headerRow2 += `<th>${info.shortName}</th>`; });
+
+  // Build header row 3 (employee names)
+  let headerRow3 = "";
+  data.teamLeaderHeaders.forEach((h) => { headerRow3 += `<th style="background:#00B0F0;color:#fff;">${h.name}</th>`; });
+  data.reliefHeaders.forEach((h) => { headerRow3 += `<th style="background:#FFFF00;">${h.name}</th>`; });
+  headerRow3 += `<th style="background:#FFFF00;">${data.militaryReliefHeader.name}</th>`;
+  headerRow3 += `<th style="background:#FFFF00;">${data.eveningReliefHeader.name}</th>`;
+  data.urbanRouteInfos.forEach((info) => { headerRow3 += `<th>${info.ownerShortName}</th>`; });
+
+  // Build data rows
+  let dataRows = "";
+  data.rows.forEach((row) => {
+    dataRows += "<tr>";
+    dataRows += `<td style="text-align:center;font-weight:bold;">${row.workDay}</td>`;
+    dataRows += `<td style="white-space:nowrap;font-weight:bold;">${row.date}</td>`;
+    dataRows += `<td style="font-size:11px;">${row.leaveNames.join("、")}</td>`;
+    row.teamLeaderCells.forEach((c) => { dataRows += `<td style="${cellStyle(c)}">${c.text}</td>`; });
+    row.reliefCells.forEach((c) => { dataRows += `<td style="${cellStyle(c)}">${c.text}</td>`; });
+    dataRows += `<td style="${cellStyle(row.militaryCell)}">${row.militaryCell.text}</td>`;
+    dataRows += `<td style="${cellStyle(row.eveningCell)}">${row.eveningCell.text}</td>`;
+    row.urbanCells.forEach((c) => { dataRows += `<td style="${cellStyle(c)}">${c.text}</td>`; });
+    dataRows += "</tr>";
+  });
+
+  popup.document.open();
+  popup.document.write(`<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <title>${data.title} ${data.subtitle}</title>
+  <style>
+    body { font-family: "Segoe UI", "Noto Sans TC", "Microsoft JhengHei", sans-serif; margin: 0; padding: 16px; background: #f6f1e8; color: #2f2418; }
+    h1 { margin: 0 0 4px; font-size: 18px; }
+    .subtitle { margin: 0 0 12px; font-size: 13px; color: #6f6254; }
+    table { width: 100%; border-collapse: collapse; background: #fffdf9; font-size: 12px; }
+    th, td { border: 1px solid #b0a090; padding: 4px 6px; text-align: center; vertical-align: middle; }
+    th { background: #f1e3d1; white-space: nowrap; font-size: 11px; }
+    .btn-row { margin-bottom: 12px; }
+    .btn-row button { padding: 8px 20px; font-size: 14px; cursor: pointer; border: 1px solid #c0a87c; background: #8b6f47; color: #fff; border-radius: 6px; }
+    .btn-row button:hover { background: #6e5535; }
+    @media print {
+      body { padding: 4px; background: #fff; }
+      .btn-row { display: none; }
+      table { font-size: 9px; }
+      th, td { padding: 2px 3px; }
+      h1 { font-size: 14px; }
+      .subtitle { font-size: 10px; }
+    }
+    @page { size: landscape; margin: 8mm; }
+  </style>
+</head>
+<body>
+  <div class="btn-row">
+    <button onclick="window.print()">🖨️ 列印</button>
+  </div>
+  <h1>${data.title}   ${data.subtitle}</h1>
+  <table>
+    <thead>
+      <tr>${headerRow2}</tr>
+      <tr>${headerRow3}</tr>
+    </thead>
+    <tbody>${dataRows}
+      <tr><td colspan="2" style="font-weight:bold;text-align:center;">備註</td><td colspan="${totalCols - 2}"></td></tr>
+    </tbody>
+  </table>
+</body>
+</html>`);
+  popup.document.close();
+  popup.focus();
+}
+
+function exportMonthlyScheduleExcel(startDate, endDate) {
+  if (typeof XLSX === "undefined") {
+    window.alert("Excel 匯出套件尚未載入，請重新整理頁面後再試。");
+    return;
+  }
+
+  const data = buildMonthlyExportData(startDate, endDate);
+  const wb = XLSX.utils.book_new();
+
+  const headerStyle = { font: { bold: true, sz: 11 }, alignment: { horizontal: "center", vertical: "center" }, border: { top: { style: "thin" }, bottom: { style: "thin" }, left: { style: "thin" }, right: { style: "thin" } } };
+  const titleStyle = { font: { bold: true, sz: 14 }, alignment: { horizontal: "center", vertical: "center" } };
+  const cellBorder = { border: { top: { style: "thin" }, bottom: { style: "thin" }, left: { style: "thin" }, right: { style: "thin" } }, alignment: { horizontal: "center", vertical: "center", wrapText: true }, font: { sz: 10 } };
+  const blueHeader = { ...headerStyle, fill: { fgColor: { rgb: "00B0F0" } }, font: { bold: true, sz: 11, color: { rgb: "FFFFFF" } } };
+  const yellowHeader = { ...headerStyle, fill: { fgColor: { rgb: "FFFF00" } } };
+  const yellowRedHeader = { ...headerStyle, fill: { fgColor: { rgb: "FFFF00" } }, font: { bold: true, sz: 11, color: { rgb: "FF0000" } } };
+
+  const colorFills = {
+    green: { ...cellBorder, fill: { fgColor: { rgb: "92D050" } } },
+    yellow: { ...cellBorder, fill: { fgColor: { rgb: "FFFF00" } } },
+    orange: { ...cellBorder, fill: { fgColor: { rgb: "FFC000" } } },
+    lightblue: { ...cellBorder, fill: { fgColor: { rgb: "B4D8E7" } } },
+  };
+
+  // Calculate total columns
+  const tlCount = data.teamLeaderHeaders.length;
+  const rsCount = data.reliefHeaders.length;
+  const urbanCount = data.urbanRouteInfos.length;
+  const totalCols = 3 + tlCount + rsCount + 1 + 1 + urbanCount;
+
+  // Row 0: Title
+  const row0 = [{ v: `${data.title}　${data.subtitle}`, s: titleStyle }];
+  for (let i = 1; i < totalCols; i++) row0.push({ v: "", s: titleStyle });
+
+  // Row 1: Group headers
+  const row1 = [
+    { v: "工作天", s: headerStyle },
+    { v: "日期", s: headerStyle },
+    { v: "休假狀況", s: headerStyle },
+  ];
+  data.teamLeaderHeaders.forEach((h) => row1.push({ v: "組長", s: blueHeader }));
+  data.reliefHeaders.forEach((h) => row1.push({ v: "抵休", s: yellowHeader }));
+  row1.push({ v: "軍功/抵休", s: yellowRedHeader });
+  row1.push({ v: "晚班/抵休", s: yellowRedHeader });
+  data.urbanRouteInfos.forEach((info) => row1.push({ v: info.shortName, s: headerStyle }));
+
+  // Row 2: Employee names
+  const row2 = [
+    { v: "", s: headerStyle },
+    { v: "", s: headerStyle },
+    { v: "", s: headerStyle },
+  ];
+  data.teamLeaderHeaders.forEach((h) => row2.push({ v: h.name, s: blueHeader }));
+  data.reliefHeaders.forEach((h) => row2.push({ v: h.name, s: yellowHeader }));
+  row2.push({ v: data.militaryReliefHeader.name, s: yellowHeader });
+  row2.push({ v: data.eveningReliefHeader.name, s: yellowHeader });
+  data.urbanRouteInfos.forEach((info) => row2.push({ v: info.ownerShortName, s: headerStyle }));
+
+  // Data rows
+  const allRows = [row0, row1, row2];
+  data.rows.forEach((row) => {
+    const r = [
+      { v: row.workDay, s: { ...cellBorder, font: { bold: true, sz: 10 } } },
+      { v: row.date, s: { ...cellBorder, font: { bold: true, sz: 10 } } },
+      { v: row.leaveNames.join("、"), s: { ...cellBorder, alignment: { horizontal: "left", vertical: "center", wrapText: true }, font: { sz: 9 } } },
+    ];
+    row.teamLeaderCells.forEach((c) => r.push({ v: c.text, s: c.color ? colorFills[c.color] : cellBorder }));
+    row.reliefCells.forEach((c) => r.push({ v: c.text, s: c.color ? colorFills[c.color] : cellBorder }));
+    r.push({ v: row.militaryCell.text, s: row.militaryCell.color ? colorFills[row.militaryCell.color] : cellBorder });
+    r.push({ v: row.eveningCell.text, s: row.eveningCell.color ? colorFills[row.eveningCell.color] : cellBorder });
+    row.urbanCells.forEach((c) => r.push({ v: c.text, s: c.color ? colorFills[c.color] : cellBorder }));
+    allRows.push(r);
+  });
+
+  const ws = XLSX.utils.aoa_to_sheet(allRows);
+
+  // Merges: title row spans all columns
+  ws["!merges"] = [
+    { s: { r: 0, c: 0 }, e: { r: 0, c: totalCols - 1 } },
+    // Row 1-2: merge 工作天, 日期, 休假狀況 vertically
+    { s: { r: 1, c: 0 }, e: { r: 2, c: 0 } },
+    { s: { r: 1, c: 1 }, e: { r: 2, c: 1 } },
+    { s: { r: 1, c: 2 }, e: { r: 2, c: 2 } },
+  ];
+  // Merge 組長 header if 2 columns
+  if (tlCount > 1) {
+    ws["!merges"].push({ s: { r: 1, c: 3 }, e: { r: 1, c: 3 + tlCount - 1 } });
+  }
+  // Merge 抵休 header if 2 columns
+  if (rsCount > 1) {
+    ws["!merges"].push({ s: { r: 1, c: 3 + tlCount }, e: { r: 1, c: 3 + tlCount + rsCount - 1 } });
+  }
+
+  // Column widths (matching user-adjusted layout for landscape A4 print)
+  ws["!cols"] = [
+    { wch: 8.78 },   // A: 工作天
+    { wch: 10.78 },  // B: 日期
+    { wch: 36.89 },  // C: 休假狀況
+  ];
+  for (let i = 0; i < tlCount + rsCount + 2 + urbanCount; i++) ws["!cols"].push({ wch: 13 });
+
+  // Row heights (matching user-adjusted layout)
+  ws["!rows"] = [
+    { hpt: 28.05 },  // Row 0: Title
+    { hpt: 19.8 },   // Row 1: Group headers
+    { hpt: 19.8 },   // Row 2: Employee names
+  ];
+  for (let i = 0; i < data.rows.length; i++) ws["!rows"].push({ hpt: 19.95 });
+
+  // Add 備註 row at the end
+  const noteRowIdx = allRows.length;
+  const noteRow = [{ v: "備註", s: { ...cellBorder, font: { bold: true, sz: 10 } } }, { v: "", s: cellBorder }];
+  for (let i = 2; i < totalCols; i++) noteRow.push({ v: "", s: cellBorder });
+  allRows.push(noteRow);
+  // Re-create sheet with updated allRows
+  const wsUpdated = XLSX.utils.aoa_to_sheet(allRows);
+  // Copy merges and cols/rows to updated sheet
+  wsUpdated["!merges"] = [
+    ...ws["!merges"],
+    { s: { r: noteRowIdx, c: 0 }, e: { r: noteRowIdx, c: 1 } },       // 備註 label spans A-B
+    { s: { r: noteRowIdx, c: 2 }, e: { r: noteRowIdx, c: totalCols - 1 } }, // 備註 content spans C-S
+  ];
+  wsUpdated["!cols"] = ws["!cols"];
+  ws["!rows"].push({ hpt: 24 }); // 備註 row height
+  wsUpdated["!rows"] = ws["!rows"];
+
+  XLSX.utils.book_append_sheet(wb, wsUpdated, "排班表");
+
+  const fileName = `${data.title.replace(/\s/g, "")}_抵休代班排程表.xlsx`;
+  XLSX.writeFile(wb, fileName);
+}
+
 function openRangeBoardWindow(startDate, endDate) {
   const allDates = enumerateDates(startDate, endDate);
   const popup = window.open("", `range-board-${startDate}-${endDate}`, "width=1600,height=900,scrollbars=yes,resizable=yes");
@@ -2202,7 +2649,7 @@ function renderMasterDataPanel(currentUser) {
       <label>角色<select name="role">${Object.entries(roleLabels).map(([key, label]) => `<option value="${key}">${label}</option>`).join("")}</select></label>
       <label>班別<select name="shift">${labelOptions("shifts")}</select></label>
       <label>固定路線<select name="defaultRouteId"><option value="">未指定路線</option>${routeOptions()}</select></label>
-      <label>是否備員<select name="isRelief"><option value="false">否</option><option value="true">是</option></select></label>
+      <label>是否抵休<select name="isRelief"><option value="false">否</option><option value="true">是</option></select></label>
       <label>可支援代班<select name="canCoverShift"><option value="false">否</option><option value="true">是</option></select></label>
       <label>在職狀態
         <select name="employmentStatus">
@@ -2936,6 +3383,8 @@ function startFirebaseListener() {
     const localSession = { ...state.session };
     state = remoteState;
     state.session = localSession;
+    // Apply role migrations after Firebase sync
+    applyEmployeeMigrations(state);
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
     render();
   });
