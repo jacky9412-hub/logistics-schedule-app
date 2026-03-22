@@ -3366,7 +3366,13 @@ function applyFirebaseState(firebaseState) {
   if (!state.mileageTable) {
     state.mileageTable = buildInitialState().mileageTable;
   }
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  // Apply employee role migrations and save back to Firebase if changed
+  const migrated = applyEmployeeMigrations(state);
+  if (migrated) {
+    saveState();
+  } else {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  }
   render();
 }
 
