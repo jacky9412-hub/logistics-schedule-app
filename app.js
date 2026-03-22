@@ -214,6 +214,21 @@ const shiftCoverageOperators = new Set([
   "林x聖",
 ]);
 
+// Canonical display order for routes — matches mileage reference table numbering
+const ROUTE_DISPLAY_ORDER = routeSeeds.map((r) => r.name);
+
+function sortedRoutes() {
+  return [...state.routes].sort((a, b) => {
+    const ia = ROUTE_DISPLAY_ORDER.indexOf(a.name);
+    const ib = ROUTE_DISPLAY_ORDER.indexOf(b.name);
+    // Routes not in seed list go to the end, sorted by name
+    if (ia === -1 && ib === -1) return a.name.localeCompare(b.name, "zh-Hant");
+    if (ia === -1) return 1;
+    if (ib === -1) return -1;
+    return ia - ib;
+  });
+}
+
 function makeId(prefix) {
   return `${prefix}-${Math.random().toString(36).slice(2, 10)}`;
 }
@@ -751,7 +766,7 @@ function employeeOptions({ includeAll = true, includeReliefOnly = false } = {}) 
 }
 
 function routeOptions() {
-  return state.routes
+  return sortedRoutes()
     .map((route) => `<option value="${route.id}">${route.name} | 核定里程 ${route.approvedMileage}</option>`)
     .join("");
 }
@@ -1236,8 +1251,8 @@ function renderSchedulingWorkbenchV2(currentUser) {
             <label>狀態<select name="status">${Object.entries(state.labelSettings.statuses).map(([k, v]) => `<option value="${k}" ${asg.status === k ? "selected" : ""}>${v}</option>`).join("")}</select></label>
             <label>假別<select name="leaveType">${Object.entries(state.labelSettings.leaveTypes).map(([k, v]) => `<option value="${k}" ${asg.leaveType === k ? "selected" : ""}>${v}</option>`).join("")}<option value="" ${!asg.leaveType ? "selected" : ""}>無</option></select></label>
             <label>班別<select name="shift">${Object.entries(state.labelSettings.shifts).map(([k, v]) => `<option value="${k}" ${asg.shift === k ? "selected" : ""}>${v}</option>`).join("")}</select></label>
-            <label>路線（上午 / 主要）<select name="routeId">${state.routes.map((r) => `<option value="${r.id}" ${asg.routeId === r.id ? "selected" : ""}>${r.name}</option>`).join("")}</select></label>
-            <label>併線路線（下午）<select name="secondaryRouteId"><option value="" ${!asg.secondaryRouteId ? "selected" : ""}>無（不併線）</option>${state.routes.map((r) => `<option value="${r.id}" ${asg.secondaryRouteId === r.id ? "selected" : ""}>${r.name}</option>`).join("")}</select></label>
+            <label>路線（上午 / 主要）<select name="routeId">${sortedRoutes().map((r) => `<option value="${r.id}" ${asg.routeId === r.id ? "selected" : ""}>${r.name}</option>`).join("")}</select></label>
+            <label>併線路線（下午）<select name="secondaryRouteId"><option value="" ${!asg.secondaryRouteId ? "selected" : ""}>無（不併線）</option>${sortedRoutes().map((r) => `<option value="${r.id}" ${asg.secondaryRouteId === r.id ? "selected" : ""}>${r.name}</option>`).join("")}</select></label>
             <label>備註<textarea name="note">${asg.note || ""}</textarea></label>
             <button type="submit">儲存修改</button>
           </form>`;
@@ -2196,7 +2211,7 @@ function renderMasterDataPanel(currentUser) {
           <option value="unpaidLeave">留職停薪</option>
         </select>
       </label>
-      <label>支援路線（可多選）<select name="supportLineIds" multiple>${state.routes.map((route) => `<option value="${route.id}">${route.name}</option>`).join("")}</select></label>
+      <label>支援路線（可多選）<select name="supportLineIds" multiple>${sortedRoutes().map((route) => `<option value="${route.id}">${route.name}</option>`).join("")}</select></label>
       <button type="submit">儲存員工</button>
     </form>
   `;
@@ -2215,7 +2230,7 @@ function renderMasterDataPanel(currentUser) {
       <label>選擇既有路線
         <select name="existingRouteId">
           <option value="">新增路線</option>
-          ${state.routes.sort((a, b) => a.name.localeCompare(b.name, "zh-Hant")).map((route) => `<option value="${route.id}">${route.name}</option>`).join("")}
+          ${sortedRoutes().map((route) => `<option value="${route.id}">${route.name}</option>`).join("")}
         </select>
       </label>
       <div class="action-row">
