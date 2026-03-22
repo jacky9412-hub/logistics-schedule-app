@@ -435,15 +435,18 @@ function buildInitialState() {
 }
 
 function applyEmployeeMigrations(stateObj) {
-  if (!stateObj.employees) return;
+  if (!stateObj.employees) return false;
+  let changed = false;
   stateObj.employees.forEach((employee) => {
     // 林x熙 is 軍功段 owner but also serves as 抵休 (relief staff)
-    if (employee.name === "林x熙") {
+    if (employee.name === "林x熙" && employee.role !== "reliefStaff") {
       employee.role = "reliefStaff";
       employee.isRelief = true;
       employee.canCoverShift = true;
+      changed = true;
     }
   });
+  return changed;
 }
 
 function loadState() {
@@ -3384,8 +3387,12 @@ function startFirebaseListener() {
     state = remoteState;
     state.session = localSession;
     // Apply role migrations after Firebase sync
-    applyEmployeeMigrations(state);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    const migrated = applyEmployeeMigrations(state);
+    if (migrated) {
+      saveState(); // Write corrected roles back to Firebase
+    } else {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    }
     render();
   });
 }
