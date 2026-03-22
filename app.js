@@ -837,7 +837,7 @@ function buildMonthlyExportData(startDate, endDate) {
             let text = route.name;
             if (assignment.secondaryRouteId) {
               const secRoute = getRouteById(assignment.secondaryRouteId);
-              if (secRoute) text += `    +${secRoute.name.charAt(0)}`;
+              if (secRoute) text = `(上)${route.name}\n(下)${secRoute.name}`;
             }
             return { text, color: "yellow" };
           }
