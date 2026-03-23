@@ -110,12 +110,57 @@ const roleLabels = {
 
 const fixedEmployeeOrderByName = new Map([
   ["洪主任", 1],
-  ["齊x擷", 2],
-  ["林x強", 3],
-  ["張xx怡", 4],
-  ["許x佳", 5],
-  ["劉x漢", 6],
-  ["陳x清", 7],
+  ["宏擷", 2],
+  ["凱強", 3],
+  ["明怡", 4],
+  ["志佳", 5],
+  ["邦漢", 6],
+  ["翔清", 7],
+  ["倉熙", 8],
+  ["長霖", 9],
+  ["繼光", 10],
+  ["智順", 11],
+  ["琮緯", 12],
+  ["佑謙", 13],
+  ["宥冰", 14],
+  ["家豪", 15],
+  ["炎億", 16],
+  ["鴻民", 17],
+  ["裕庭", 18],
+  ["懷慶", 19],
+  ["庭愷", 20],
+  ["建仁", 21],
+  ["哲維", 22],
+  ["玉女", 23],
+  ["志剛", 24],
+  ["良賢", 25],
+  ["建凱", 26],
+  ["家瑞", 27],
+  ["逸文", 28],
+  ["德豐", 29],
+  ["育宗", 30],
+  ["坤宗", 31],
+  ["孟峰", 32],
+  ["維遠", 33],
+  ["珽安", 34],
+  ["祥瑜", 35],
+  ["書豪", 36],
+  ["昱瑋", 37],
+  ["新洋", 38],
+  ["鴻昇", 39],
+  ["彥鈞", 40],
+  ["信佑", 41],
+  ["明軒", 42],
+  ["家弘", 43],
+  ["獻斌", 44],
+  ["崇傑", 45],
+  ["凱瑋", 46],
+  ["虹享", 47],
+  ["政偉", 48],
+  ["曉謙", 49],
+  ["秋貴", 50],
+  ["文聖", 51],
+  ["世文", 52],
 ]);
 
 const roleOrderForList = {
@@ -139,80 +184,80 @@ const routeTypeLabels = {
 };
 
 const routeSeeds = [
-  { name: "大夜班", type: "special", approvedMileage: 6, owner: "何x霖" },
-  { name: "嘉義線", type: "car", approvedMileage: 279, owner: "黃x光" },
-  { name: "雲林線", type: "car", approvedMileage: 189, owner: "郭x順" },
-  { name: "苗栗線", type: "car", approvedMileage: 187, owner: "蔡x緯" },
-  { name: "員林線", type: "car", approvedMileage: 197, owner: "張x謙" },
-  { name: "大甲線", type: "car", approvedMileage: 167, owner: "姚x冰" },
-  { name: "埔里線", type: "car", approvedMileage: 210, owner: "張x豪" },
-  { name: "鹿港線", type: "car", approvedMileage: 118, owner: "陳x億" },
-  { name: "作業中心線", type: "car", approvedMileage: 62, owner: "藍x民" },
-  { name: "中區段(晚班)", type: "scooter", approvedMileage: 36, owner: "邱x庭" },
-  { name: "軍功段", type: "scooter", approvedMileage: 49, owner: "林x熙" },
-  { name: "南屯段", type: "scooter", approvedMileage: 47, owner: "黃x慶" },
-  { name: "市政段", type: "scooter", approvedMileage: 53, owner: "張x愷" },
-  { name: "黎明段", type: "scooter", approvedMileage: 57, owner: "陳x仁" },
-  { name: "松竹段", type: "scooter", approvedMileage: 66, owner: "吳x維" },
-  { name: "中工段", type: "scooter", approvedMileage: 81, owner: "黃x女" },
-  { name: "中港段", type: "scooter", approvedMileage: 52, owner: "趙x剛" },
-  { name: "文心段", type: "scooter", approvedMileage: 41, owner: "洪x賢" },
-  { name: "大雅段", type: "scooter", approvedMileage: 66, owner: "王x凱" },
-  { name: "太平段", type: "scooter", approvedMileage: 45, owner: "許x瑞" },
-  { name: "大里段", type: "scooter", approvedMileage: 64, owner: "李x文" },
-  { name: "東勢段", type: "scooter", approvedMileage: 94, owner: "楊x豐" },
-  { name: "后里段", type: "scooter", approvedMileage: 88, owner: "劉x宗" },
-  { name: "清水段", type: "scooter", approvedMileage: 77, owner: "江x宗" },
-  { name: "沙鹿段", type: "scooter", approvedMileage: 70, owner: "吳x峰" },
-  { name: "梧棲段(半日)", type: "scooter", approvedMileage: 67, owner: "羅x遠" },
-  { name: "玉山大雅(半日)", type: "scooter", approvedMileage: 43, owner: "魏x安" },
-  { name: "玉山南屯(晚班)", type: "scooter", approvedMileage: 30, owner: "傅x瑜" },
-  { name: "市政二段(晚班)", type: "scooter", approvedMileage: 38, owner: "歐x豪" },
-  { name: "南區段(晚班)", type: "scooter", approvedMileage: 28, owner: "賴x瑋" },
-  { name: "彰化段", type: "scooter", approvedMileage: 103, owner: "魏x洋" },
-  { name: "和美段", type: "scooter", approvedMileage: 97, owner: "葉x昇" },
-  { name: "員林段", type: "scooter", approvedMileage: 50, owner: "黃x鈞" },
-  { name: "溪湖段", type: "scooter", approvedMileage: 44, owner: "陳x佑" },
-  { name: "頭份段", type: "scooter", approvedMileage: 61, owner: "謝x軒" },
-  { name: "竹南段", type: "scooter", approvedMileage: 61, owner: "俞x弘" },
-  { name: "草屯段", type: "scooter", approvedMileage: 88, owner: "洪x斌" },
-  { name: "竹山段", type: "scooter", approvedMileage: 116, owner: "柳x傑" },
-  { name: "南投段(半日)", type: "scooter", approvedMileage: 70, owner: "黃x瑋" },
-  { name: "西螺段", type: "scooter", approvedMileage: 78, owner: "陳x享" },
-  { name: "北港段", type: "scooter", approvedMileage: 104, owner: "蔡x偉" },
-  { name: "虎尾段", type: "scooter", approvedMileage: 65, owner: "沈x謙" },
-  { name: "中埔段", type: "scooter", approvedMileage: 66, owner: "徐x文" },
-  { name: "朴子段", type: "scooter", approvedMileage: 76, owner: "蔡x貴" },
-  { name: "新港段", type: "scooter", approvedMileage: 62, owner: "林x聖" },
+  { name: "大夜班", type: "special", approvedMileage: 6, owner: "長霖" },
+  { name: "嘉義線", type: "car", approvedMileage: 279, owner: "繼光" },
+  { name: "雲林線", type: "car", approvedMileage: 189, owner: "智順" },
+  { name: "苗栗線", type: "car", approvedMileage: 187, owner: "琮緯" },
+  { name: "員林線", type: "car", approvedMileage: 197, owner: "佑謙" },
+  { name: "大甲線", type: "car", approvedMileage: 167, owner: "宥冰" },
+  { name: "埔里線", type: "car", approvedMileage: 210, owner: "家豪" },
+  { name: "鹿港線", type: "car", approvedMileage: 118, owner: "炎億" },
+  { name: "作業中心線", type: "car", approvedMileage: 62, owner: "鴻民" },
+  { name: "中區段(晚班)", type: "scooter", approvedMileage: 36, owner: "裕庭" },
+  { name: "軍功段", type: "scooter", approvedMileage: 49, owner: "倉熙" },
+  { name: "南屯段", type: "scooter", approvedMileage: 47, owner: "懷慶" },
+  { name: "市政段", type: "scooter", approvedMileage: 53, owner: "庭愷" },
+  { name: "黎明段", type: "scooter", approvedMileage: 57, owner: "建仁" },
+  { name: "松竹段", type: "scooter", approvedMileage: 66, owner: "哲維" },
+  { name: "中工段", type: "scooter", approvedMileage: 81, owner: "玉女" },
+  { name: "中港段", type: "scooter", approvedMileage: 52, owner: "志剛" },
+  { name: "文心段", type: "scooter", approvedMileage: 41, owner: "良賢" },
+  { name: "大雅段", type: "scooter", approvedMileage: 66, owner: "建凱" },
+  { name: "太平段", type: "scooter", approvedMileage: 45, owner: "家瑞" },
+  { name: "大里段", type: "scooter", approvedMileage: 64, owner: "逸文" },
+  { name: "東勢段", type: "scooter", approvedMileage: 94, owner: "德豐" },
+  { name: "后里段", type: "scooter", approvedMileage: 88, owner: "育宗" },
+  { name: "清水段", type: "scooter", approvedMileage: 77, owner: "坤宗" },
+  { name: "沙鹿段", type: "scooter", approvedMileage: 70, owner: "孟峰" },
+  { name: "梧棲段(半日)", type: "scooter", approvedMileage: 67, owner: "維遠" },
+  { name: "玉山大雅(半日)", type: "scooter", approvedMileage: 43, owner: "珽安" },
+  { name: "玉山南屯(晚班)", type: "scooter", approvedMileage: 30, owner: "祥瑜" },
+  { name: "市政二段(晚班)", type: "scooter", approvedMileage: 38, owner: "書豪" },
+  { name: "南區段(晚班)", type: "scooter", approvedMileage: 28, owner: "昱瑋" },
+  { name: "彰化段", type: "scooter", approvedMileage: 103, owner: "新洋" },
+  { name: "和美段", type: "scooter", approvedMileage: 97, owner: "鴻昇" },
+  { name: "員林段", type: "scooter", approvedMileage: 50, owner: "彥鈞" },
+  { name: "溪湖段", type: "scooter", approvedMileage: 44, owner: "信佑" },
+  { name: "頭份段", type: "scooter", approvedMileage: 61, owner: "明軒" },
+  { name: "竹南段", type: "scooter", approvedMileage: 61, owner: "家弘" },
+  { name: "草屯段", type: "scooter", approvedMileage: 88, owner: "獻斌" },
+  { name: "竹山段", type: "scooter", approvedMileage: 116, owner: "崇傑" },
+  { name: "南投段(半日)", type: "scooter", approvedMileage: 70, owner: "凱瑋" },
+  { name: "西螺段", type: "scooter", approvedMileage: 78, owner: "虹享" },
+  { name: "北港段", type: "scooter", approvedMileage: 104, owner: "政偉" },
+  { name: "虎尾段", type: "scooter", approvedMileage: 65, owner: "曉謙" },
+  { name: "中埔段", type: "scooter", approvedMileage: 66, owner: "秋貴" },
+  { name: "朴子段", type: "scooter", approvedMileage: 76, owner: "文聖" },
+  { name: "新港段", type: "scooter", approvedMileage: 62, owner: "世文" },
 ];
 
 const specialStaffSeeds = [
-  { name: "齊x擷", role: "teamLeader", isRelief: false },
-  { name: "林x強", role: "teamLeader", isRelief: false },
-  { name: "許x佳", role: "reliefStaff", isRelief: true },
-  { name: "劉x漢", role: "reliefStaff", isRelief: true },
-  { name: "陳x清", role: "reliefStaff", isRelief: true },
-  { name: "張xx怡", role: "adminStaff", isRelief: false },
+  { name: "宏擷", role: "teamLeader", isRelief: false },
+  { name: "凱強", role: "teamLeader", isRelief: false },
+  { name: "志佳", role: "reliefStaff", isRelief: true },
+  { name: "邦漢", role: "reliefStaff", isRelief: true },
+  { name: "翔清", role: "reliefStaff", isRelief: true },
+  { name: "明怡", role: "adminStaff", isRelief: false },
   { name: "洪主任", role: "supervisor", isRelief: false },
 ];
 
 const shiftCoverageOperators = new Set([
-  "林x熙",
-  "黃x慶",
-  "張x愷",
-  "陳x仁",
-  "吳x維",
-  "黃x女",
-  "趙x剛",
-  "洪x賢",
-  "許x瑞",
-  "李x文",
-  "陳x享",
-  "蔡x偉",
-  "沈x謙",
-  "徐x文",
-  "蔡x貴",
-  "林x聖",
+  "倉熙",
+  "懷慶",
+  "庭愷",
+  "建仁",
+  "哲維",
+  "玉女",
+  "志剛",
+  "良賢",
+  "家瑞",
+  "逸文",
+  "虹享",
+  "政偉",
+  "曉謙",
+  "秋貴",
+  "文聖",
+  "世文",
 ]);
 
 // Canonical display order for routes — matches mileage reference table numbering
@@ -311,8 +356,8 @@ function buildInitialState() {
     })),
   ];
 
-  // 林x熙 is 軍功段 owner but also serves as 抵休 (relief staff)
-  const linXixi = employees.find((e) => e.name === "林x熙");
+  // 倉熙 is 軍功段 owner but also serves as 抵休 (relief staff)
+  const linXixi = employees.find((e) => e.name === "倉熙");
   if (linXixi) { linXixi.role = "reliefStaff"; linXixi.isRelief = true; linXixi.canCoverShift = true; }
 
   const companySettings = {
@@ -338,7 +383,7 @@ function buildInitialState() {
     });
   });
 
-  const nightOwner = employees.find((employee) => employee.name === "何x霖");
+  const nightOwner = employees.find((employee) => employee.name === "長霖");
   const relief = employees.find((employee) => employee.role === "reliefStaff");
   if (nightOwner && relief) {
     const leaveAssignment = assignments.find((assignment) => assignment.employeeId === nightOwner.id && assignment.date === "2026-03-20");
@@ -435,12 +480,26 @@ function buildInitialState() {
   };
 }
 
+const nameRenameMap = new Map([
+  ["齊x擷","宏擷"],["林x強","凱強"],["許x佳","志佳"],["劉x漢","邦漢"],["陳x清","翔清"],["張xx怡","明怡"],
+  ["何x霖","長霖"],["黃x光","繼光"],["郭x順","智順"],["蔡x緯","琮緯"],["張x謙","佑謙"],["姚x冰","宥冰"],
+  ["張x豪","家豪"],["陳x億","炎億"],["藍x民","鴻民"],["邱x庭","裕庭"],["林x熙","倉熙"],["林x裕","國裕"],
+  ["黃x慶","懷慶"],["張x愷","庭愷"],["陳x仁","建仁"],["吳x維","哲維"],["黃x女","玉女"],["趙x剛","志剛"],
+  ["洪x賢","良賢"],["王x俊","溪俊"],["王x凱","建凱"],["許x瑞","家瑞"],["李x文","逸文"],["楊x豐","德豐"],
+  ["劉x宗","育宗"],["江x宗","坤宗"],["吳x峰","孟峰"],["羅x遠","維遠"],["魏x安","珽安"],["傅x瑜","祥瑜"],
+  ["歐x豪","書豪"],["賴x瑋","昱瑋"],["魏x洋","新洋"],["葉x昇","鴻昇"],["黃x鈞","彥鈞"],["陳x佑","信佑"],
+  ["謝x軒","明軒"],["俞x弘","家弘"],["洪x斌","獻斌"],["柳x傑","崇傑"],["黃x瑋","凱瑋"],["陳x享","虹享"],
+  ["蔡x偉","政偉"],["沈x謙","曉謙"],["徐x文","秋貴"],["蔡x貴","文聖"],["林x聖","世文"],
+]);
+
 function applyEmployeeMigrations(stateObj) {
   if (!stateObj.employees) return false;
   let changed = false;
   stateObj.employees.forEach((employee) => {
-    // 林x熙 is 軍功段 owner but also serves as 抵休 (relief staff)
-    if (employee.name === "林x熙" && employee.role !== "reliefStaff") {
+    const newName = nameRenameMap.get(employee.name);
+    if (newName) { employee.name = newName; changed = true; }
+    // 倉熙 is 軍功段 owner but also serves as 抵休 (relief staff)
+    if (employee.name === "倉熙" && employee.role !== "reliefStaff") {
       employee.role = "reliefStaff";
       employee.isRelief = true;
       employee.canCoverShift = true;
@@ -460,6 +519,7 @@ function loadState() {
     if (!parsed.routes?.[0]?.approvedMileage || !parsed.employees?.some((employee) => "defaultRouteId" in employee)) {
       return buildInitialState();
     }
+    applyEmployeeMigrations(parsed);
     parsed.employees.forEach((employee) => {
       const isLeaderOrSupervisor = ["teamLeader", "supervisor"].includes(employee.role);
       const isCoverageOperator = shiftCoverageOperators.has(employee.name);
@@ -473,7 +533,6 @@ function loadState() {
         employee.canCoverShift = !!employee.isRelief;
       }
     });
-    applyEmployeeMigrations(parsed);
     parsed.session = parsed.session || {};
     parsed.session.lastGeneratedRange = parsed.session.lastGeneratedRange || null;
     parsed.labelSettings = parsed.labelSettings || {};
@@ -798,17 +857,17 @@ function buildMonthlyExportData(startDate, endDate) {
 
   // Identify team leaders and relief staff
   const teamLeaders = [
-    getEmployeeByName("齊x擷"),
-    getEmployeeByName("林x強"),
+    getEmployeeByName("宏擷"),
+    getEmployeeByName("凱強"),
   ].filter(Boolean);
 
   const reliefStaff = [
-    getEmployeeByName("許x佳"),
-    getEmployeeByName("劉x漢"),
+    getEmployeeByName("志佳"),
+    getEmployeeByName("邦漢"),
   ].filter(Boolean);
 
-  const militaryRelief = getEmployeeByName("林x熙");
-  const eveningRelief = getEmployeeByName("陳x清");
+  const militaryRelief = getEmployeeByName("倉熙");
+  const eveningRelief = getEmployeeByName("翔清");
 
   // Column headers for display
   const teamLeaderHeaders = teamLeaders.map((e) => ({
@@ -892,10 +951,10 @@ function buildMonthlyExportData(startDate, endDate) {
     // Relief staff columns
     const reliefCells = reliefStaff.map((rs) => getEmployeeAction(rs));
 
-    // Military relief (林x熙)
+    // Military relief (倉熙)
     const militaryCell = getEmployeeAction(militaryRelief);
 
-    // Evening relief (陳x清)
+    // Evening relief (翔清)
     const eveningCell = getEmployeeAction(eveningRelief);
 
     // Urban route columns
@@ -957,8 +1016,8 @@ function buildMonthlyExportData(startDate, endDate) {
   // Calculate max leave count for individual cell layout
   const maxLeaveCount = Math.max(1, ...rows.map((r) => r.leaveNames.length));
 
-  // 值班組長：單數月=齊x擷，雙數月=林x強
-  const dutyLeader = monthNum % 2 === 1 ? "齊x擷" : "林x強";
+  // 值班組長：單數月=宏擷，雙數月=凱強
+  const dutyLeader = monthNum % 2 === 1 ? "宏擷" : "凱強";
   const today = new Date();
   const todayTaiwanYear = today.getFullYear() - 1911;
   const updateDate = `${todayTaiwanYear}.${String(today.getMonth() + 1).padStart(2, "0")}.${String(today.getDate()).padStart(2, "0")}`;
@@ -1057,7 +1116,7 @@ function syncSelectors() {
     if (protectedRoles.includes(role)) {
       const users = getRoleUsers(role);
       if (users.length > 1) {
-        // Show each person as a separate option: "組長 - 齊x擷"
+        // Show each person as a separate option: "組長 - 宏擷"
         users.forEach((user) => {
           const val = `${role}:${user.id}`;
           const currentVal = `${state.session.role}:${state.session.userId}`;
@@ -3576,7 +3635,8 @@ function applyFirebaseState(firebaseState) {
   const localSession = { ...state.session };
   state = firebaseState;
   state.session = localSession;
-  // Run migrations
+  // Run migrations (name rename + role fixes)
+  applyEmployeeMigrations(state);
   state.employees.forEach((employee) => {
     if (!employee.employmentStatus) {
       employee.employmentStatus = employee.active ? "active" : "resigned";
