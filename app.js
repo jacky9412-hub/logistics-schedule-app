@@ -822,10 +822,8 @@ function buildMonthlyExportData(startDate, endDate) {
 
     // 特殊記載 & 併線
     const specialNotes = [...new Set(allDateAssignments.filter((a) => a.specialNote).map((a) => a.specialNote))];
-    const mergedLineRoutes = [...new Set(allDateAssignments.filter((a) => a.isMergedLine).map((a) => {
-      const r = getRouteById(a.routeId);
-      return r ? r.name : "是";
-    }))];
+    const hasMergedLine = allDateAssignments.some((a) => a.isMergedLine);
+    const mergedLineRoutes = hasMergedLine ? ["★"] : [];
 
     // Helper: get what an employee is doing on this date
     const getEmployeeAction = (emp) => {
@@ -2375,9 +2373,7 @@ function buildScheduleData(startDate, endDate) {
       }
 
       if (assignment.isMergedLine) {
-        const secRoute = assignment.secondaryRouteId ? getRouteById(assignment.secondaryRouteId) : null;
-        const priRoute = getRouteById(assignment.routeId);
-        mergedLineRoutes.push(priRoute ? priRoute.name : (secRoute ? secRoute.name : "是"));
+        mergedLineRoutes.push("★");
       }
 
       if (assignment.status !== "leave" && assignment.routeId) {
