@@ -2006,14 +2006,14 @@ function openMonthlySchedulePrintWindow(startDate, endDate) {
     .btn-row button { padding: 8px 20px; font-size: 14px; cursor: pointer; border: 1px solid #c0a87c; background: #8b6f47; color: #fff; border-radius: 6px; }
     .btn-row button:hover { background: #6e5535; }
     @media print {
-      body { padding: 0; margin: 0; background: #fff; }
+      body { padding: 2px 0 0 2px; margin: 0; background: #fff; }
       .btn-row { display: none; }
-      table { font-size: 9px; }
-      th, td { padding: 1px 2px; }
+      table { font-size: 9px; border: 1px solid #b0a090; }
+      th, td { padding: 1px 2px; border: 1px solid #b0a090; }
       h1 { font-size: 14px; margin: 0 0 2px; }
       .subtitle { font-size: 10px; margin: 0 0 4px; }
     }
-    @page { size: landscape; margin: 5mm; }
+    @page { size: landscape; margin: 6mm; }
   </style>
 </head>
 <body>
