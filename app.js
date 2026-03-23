@@ -1982,24 +1982,27 @@ function openMonthlySchedulePrintWindow(startDate, endDate) {
   <meta charset="UTF-8">
   <title>${data.title} ${data.subtitle}</title>
   <style>
+    * { box-sizing: border-box; }
     body { font-family: "Segoe UI", "Noto Sans TC", "Microsoft JhengHei", sans-serif; margin: 0; padding: 16px; background: #f6f1e8; color: #2f2418; }
     h1 { margin: 0 0 4px; font-size: 18px; }
     .subtitle { margin: 0 0 12px; font-size: 13px; color: #6f6254; }
-    table { width: 100%; border-collapse: collapse; background: #fffdf9; font-size: 12px; }
-    th, td { border: 1px solid #b0a090; padding: 4px 6px; text-align: center; vertical-align: middle; }
-    th { background: #f1e3d1; white-space: nowrap; font-size: 11px; }
+    table { width: 100%; border-collapse: collapse; background: #fffdf9; font-size: 12px; table-layout: fixed; }
+    th, td { border: 1px solid #b0a090; padding: 2px 3px; text-align: center; vertical-align: middle; overflow: hidden; word-break: break-all; }
+    th { background: #f1e3d1; font-size: 11px; }
+    /* Auto-fit text in cells */
+    td .cell-text { display: inline-block; max-width: 100%; white-space: nowrap; }
     .btn-row { margin-bottom: 12px; }
     .btn-row button { padding: 8px 20px; font-size: 14px; cursor: pointer; border: 1px solid #c0a87c; background: #8b6f47; color: #fff; border-radius: 6px; }
     .btn-row button:hover { background: #6e5535; }
     @media print {
-      body { padding: 4px; background: #fff; }
+      body { padding: 0; margin: 0; background: #fff; }
       .btn-row { display: none; }
       table { font-size: 9px; }
-      th, td { padding: 2px 3px; }
-      h1 { font-size: 14px; }
-      .subtitle { font-size: 10px; }
+      th, td { padding: 1px 2px; }
+      h1 { font-size: 14px; margin: 0 0 2px; }
+      .subtitle { font-size: 10px; margin: 0 0 4px; }
     }
-    @page { size: landscape; margin: 8mm; }
+    @page { size: landscape; margin: 5mm; }
   </style>
 </head>
 <body>
@@ -2013,9 +2016,79 @@ function openMonthlySchedulePrintWindow(startDate, endDate) {
       <tr>${headerRow3}</tr>
     </thead>
     <tbody>${dataRows}
-      <tr><td colspan="2" style="font-weight:bold;text-align:center;">備註</td><td colspan="${totalCols - 2}"></td></tr>
+      <tr class="note-row"><td colspan="2" style="font-weight:bold;text-align:center;">備註</td><td colspan="${totalCols - 2}"></td></tr>
     </tbody>
   </table>
+  <script>
+  (function() {
+    // Auto-fit font size in cells: shrink text to fit cell width
+    function autoFitCells() {
+      var cells = document.querySelectorAll('tbody td, thead th');
+      cells.forEach(function(td) {
+        var text = td.textContent.trim();
+        if (!text || text.length <= 2) return;
+        var cellW = td.clientWidth - 4;
+        if (cellW <= 0) return;
+        // Start from current font size and shrink if needed
+        var style = window.getComputedStyle(td);
+        var fontSize = parseFloat(style.fontSize);
+        var originalSize = fontSize;
+        // Create temp span to measure
+        var span = document.createElement('span');
+        span.style.visibility = 'hidden';
+        span.style.position = 'absolute';
+        span.style.whiteSpace = 'nowrap';
+        span.style.fontFamily = style.fontFamily;
+        span.style.fontWeight = style.fontWeight;
+        span.textContent = text;
+        document.body.appendChild(span);
+        while (fontSize > 6) {
+          span.style.fontSize = fontSize + 'px';
+          if (span.offsetWidth <= cellW) break;
+          fontSize -= 0.5;
+        }
+        document.body.removeChild(span);
+        if (fontSize < originalSize) {
+          td.style.fontSize = fontSize + 'px';
+        }
+      });
+    }
+
+    // Distribute row heights evenly to fill the page
+    function distributeRowHeights() {
+      var table = document.querySelector('table');
+      var h1 = document.querySelector('h1');
+      var subtitle = document.querySelector('.subtitle');
+      // Total page height for landscape A4 ≈ 710px at 96dpi with 5mm margins
+      var pageH = 710;
+      var usedH = (h1 ? h1.offsetHeight : 0) + (subtitle ? subtitle.offsetHeight + 8 : 0);
+      var thead = table.querySelector('thead');
+      var theadH = thead ? thead.offsetHeight : 0;
+      var tbody = table.querySelector('tbody');
+      var dataRows = tbody.querySelectorAll('tr:not(.note-row)');
+      var noteRow = tbody.querySelector('tr.note-row');
+      var noteH = 20;
+      var availH = pageH - usedH - theadH - noteH;
+      if (dataRows.length > 0 && availH > 0) {
+        var rowH = Math.floor(availH / dataRows.length);
+        if (rowH < 18) rowH = 18; // minimum
+        dataRows.forEach(function(row) {
+          row.style.height = rowH + 'px';
+        });
+      }
+      if (noteRow) noteRow.style.height = noteH + 'px';
+    }
+
+    setTimeout(function() {
+      autoFitCells();
+      distributeRowHeights();
+    }, 100);
+    window.addEventListener('beforeprint', function() {
+      autoFitCells();
+      distributeRowHeights();
+    });
+  })();
+  </script>
 </body>
 </html>`);
   popup.document.close();
