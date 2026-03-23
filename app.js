@@ -813,11 +813,11 @@ function buildMonthlyExportData(startDate, endDate) {
     const dayAssignments = getAssignmentsByDate(dateStr);
     const allDateAssignments = state.assignments.filter((a) => a.date === dateStr);
 
-    // 休假狀況: collect who is on leave
+    // 休假狀況: collect who is on leave (2-char short name: 姓+名尾)
     const leaveEntries = allDateAssignments.filter((a) => a.status === "leave");
     const leaveNames = leaveEntries.map((a) => {
       const emp = getEmployeeById(a.employeeId);
-      return emp ? emp.name.replace(/^(.).*?(.)$/, "$1x$2") : "";
+      return emp ? emp.name.replace(/^(.).*?(.)$/, "$1$2") : "";
     }).filter(Boolean);
 
     // 特殊記載 & 併線
@@ -919,6 +919,9 @@ function buildMonthlyExportData(startDate, endDate) {
     });
   });
 
+  // Calculate max leave count for individual cell layout
+  const maxLeaveCount = Math.max(1, ...rows.map((r) => r.leaveNames.length));
+
   // 值班組長：單數月=齊x擷，雙數月=林x強
   const dutyLeader = monthNum % 2 === 1 ? "齊x擷" : "林x強";
   const today = new Date();
@@ -933,6 +936,7 @@ function buildMonthlyExportData(startDate, endDate) {
     militaryReliefHeader,
     eveningReliefHeader,
     urbanRouteInfos,
+    maxLeaveCount,
     rows,
   };
 }
@@ -1935,13 +1939,15 @@ function openMonthlySchedulePrintWindow(startDate, endDate) {
   const popup = window.open("", `monthly-schedule-${startDate}-${endDate}`, "width=1600,height=900,scrollbars=yes,resizable=yes");
   if (!popup) { window.alert("請先允許瀏覽器開啟彈出視窗。"); return; }
 
-  const totalCols = 3 + 2 + 1 + data.teamLeaderHeaders.length + data.reliefHeaders.length + 1 + 1 + data.urbanRouteInfos.length;
+  const leaveCols = data.maxLeaveCount;
+  const totalCols = 2 + leaveCols + 2 + 1 + data.teamLeaderHeaders.length + data.reliefHeaders.length + 1 + 1 + data.urbanRouteInfos.length;
 
   const colorMap = { green: "#92D050", yellow: "#FFFF00", orange: "#FFC000", lightblue: "#B4D8E7" };
   const cellStyle = (cell) => cell.color ? `background:${colorMap[cell.color]};-webkit-print-color-adjust:exact;print-color-adjust:exact;` : "";
 
   // Build header row 2 (group headers)
-  let headerRow2 = `<th rowspan="2" style="width:40px;">工作天</th><th rowspan="2" style="width:70px;">日期</th><th rowspan="2" style="min-width:100px;">休假狀況</th>`;
+  let headerRow2 = `<th rowspan="2">工作天</th><th rowspan="2">日期</th>`;
+  headerRow2 += `<th colspan="${leaveCols}" rowspan="1">休 假 狀 況</th>`;
   headerRow2 += `<th colspan="2" rowspan="1" style="background:#e3f2fd;">特殊記載</th>`;
   headerRow2 += `<th rowspan="2" style="background:#fce4ec;">台中<br>併線</th>`;
   if (data.teamLeaderHeaders.length) headerRow2 += `<th colspan="${data.teamLeaderHeaders.length}" style="background:#00B0F0;color:#fff;">組長</th>`;
@@ -1950,8 +1956,10 @@ function openMonthlySchedulePrintWindow(startDate, endDate) {
   headerRow2 += `<th style="background:#FFFF00;color:red;">晚班/抵休</th>`;
   data.urbanRouteInfos.forEach((info) => { headerRow2 += `<th>${info.shortName}</th>`; });
 
-  // Build header row 3 (employee names)
-  let headerRow3 = `<th colspan="2" style="background:#e3f2fd;"></th>`;
+  // Build header row 3 (employee names under group headers)
+  let headerRow3 = "";
+  for (let i = 0; i < leaveCols; i++) headerRow3 += `<th></th>`;
+  headerRow3 += `<th colspan="2" style="background:#e3f2fd;"></th>`;
   data.teamLeaderHeaders.forEach((h) => { headerRow3 += `<th style="background:#00B0F0;color:#fff;">${h.name}</th>`; });
   data.reliefHeaders.forEach((h) => { headerRow3 += `<th style="background:#FFFF00;">${h.name}</th>`; });
   headerRow3 += `<th style="background:#FFFF00;">${data.militaryReliefHeader.name}</th>`;
@@ -1964,9 +1972,12 @@ function openMonthlySchedulePrintWindow(startDate, endDate) {
     dataRows += "<tr>";
     dataRows += `<td style="text-align:center;font-weight:bold;">${row.workDay}</td>`;
     dataRows += `<td style="white-space:nowrap;font-weight:bold;">${row.date}</td>`;
-    dataRows += `<td style="font-size:11px;">${row.leaveNames.join("、")}</td>`;
+    // Each leave employee gets their own cell
+    for (let i = 0; i < leaveCols; i++) {
+      dataRows += `<td>${row.leaveNames[i] || ""}</td>`;
+    }
     dataRows += `<td colspan="2" style="font-size:10px;background:#e3f2fd;">${(row.specialNotes || []).join("、")}</td>`;
-    dataRows += `<td style="font-size:10px;background:#fce4ec;">${(row.mergedLineRoutes || []).join("、")}</td>`;
+    dataRows += `<td style="background:#fce4ec;">${(row.mergedLineRoutes || []).join("")}</td>`;
     row.teamLeaderCells.forEach((c) => { dataRows += `<td style="${cellStyle(c)}">${c.text}</td>`; });
     row.reliefCells.forEach((c) => { dataRows += `<td style="${cellStyle(c)}">${c.text}</td>`; });
     dataRows += `<td style="${cellStyle(row.militaryCell)}">${row.militaryCell.text}</td>`;
@@ -2122,7 +2133,8 @@ function exportMonthlyScheduleExcel(startDate, endDate) {
   const tlCount = data.teamLeaderHeaders.length;
   const rsCount = data.reliefHeaders.length;
   const urbanCount = data.urbanRouteInfos.length;
-  const totalCols = 3 + 2 + 1 + tlCount + rsCount + 1 + 1 + urbanCount;
+  const leaveCols = data.maxLeaveCount;
+  const totalCols = 2 + leaveCols + 2 + 1 + tlCount + rsCount + 1 + 1 + urbanCount;
   const specialNoteStyle = { ...headerStyle, fill: { fgColor: { rgb: "E3F2FD" } } };
   const mergedLineStyle = { ...headerStyle, fill: { fgColor: { rgb: "FCE4EC" } } };
 
@@ -2134,11 +2146,13 @@ function exportMonthlyScheduleExcel(startDate, endDate) {
   const row1 = [
     { v: "工作天", s: headerStyle },
     { v: "日期", s: headerStyle },
-    { v: "休假狀況", s: headerStyle },
-    { v: "特殊記載", s: specialNoteStyle },
-    { v: "", s: specialNoteStyle },
-    { v: "台中併線", s: mergedLineStyle },
   ];
+  // 休假狀況 spans leaveCols columns
+  row1.push({ v: "休假狀況", s: headerStyle });
+  for (let i = 1; i < leaveCols; i++) row1.push({ v: "", s: headerStyle });
+  row1.push({ v: "特殊記載", s: specialNoteStyle });
+  row1.push({ v: "", s: specialNoteStyle });
+  row1.push({ v: "台中併線", s: mergedLineStyle });
   data.teamLeaderHeaders.forEach((h) => row1.push({ v: "組長", s: blueHeader }));
   data.reliefHeaders.forEach((h) => row1.push({ v: "抵休", s: yellowHeader }));
   row1.push({ v: "軍功/抵休", s: yellowRedHeader });
@@ -2149,11 +2163,11 @@ function exportMonthlyScheduleExcel(startDate, endDate) {
   const row2 = [
     { v: "", s: headerStyle },
     { v: "", s: headerStyle },
-    { v: "", s: headerStyle },
-    { v: "", s: specialNoteStyle },
-    { v: "", s: specialNoteStyle },
-    { v: "", s: mergedLineStyle },
   ];
+  for (let i = 0; i < leaveCols; i++) row2.push({ v: "", s: headerStyle });
+  row2.push({ v: "", s: specialNoteStyle });
+  row2.push({ v: "", s: specialNoteStyle });
+  row2.push({ v: "", s: mergedLineStyle });
   data.teamLeaderHeaders.forEach((h) => row2.push({ v: h.name, s: blueHeader }));
   data.reliefHeaders.forEach((h) => row2.push({ v: h.name, s: yellowHeader }));
   row2.push({ v: data.militaryReliefHeader.name, s: yellowHeader });
@@ -2166,11 +2180,14 @@ function exportMonthlyScheduleExcel(startDate, endDate) {
     const r = [
       { v: row.workDay, s: { ...cellBorder, font: { bold: true, sz: 10 } } },
       { v: row.date, s: { ...cellBorder, font: { bold: true, sz: 10 } } },
-      { v: row.leaveNames.join("、"), s: { ...cellBorder, alignment: { horizontal: "left", vertical: "center", wrapText: true }, font: { sz: 9 } } },
-      { v: (row.specialNotes || []).join("、"), s: { ...cellBorder, fill: { fgColor: { rgb: "E3F2FD" } }, font: { sz: 9 } } },
-      { v: "", s: { ...cellBorder, fill: { fgColor: { rgb: "E3F2FD" } }, font: { sz: 9 } } },
-      { v: (row.mergedLineRoutes || []).join("、"), s: { ...cellBorder, fill: { fgColor: { rgb: "FCE4EC" } }, font: { sz: 9 } } },
     ];
+    // Each leave employee gets their own cell
+    for (let i = 0; i < leaveCols; i++) {
+      r.push({ v: row.leaveNames[i] || "", s: cellBorder });
+    }
+    r.push({ v: (row.specialNotes || []).join("、"), s: { ...cellBorder, fill: { fgColor: { rgb: "E3F2FD" } }, font: { sz: 9 } } });
+    r.push({ v: "", s: { ...cellBorder, fill: { fgColor: { rgb: "E3F2FD" } }, font: { sz: 9 } } });
+    r.push({ v: (row.mergedLineRoutes || []).join(""), s: { ...cellBorder, fill: { fgColor: { rgb: "FCE4EC" } }, font: { sz: 9 } } });
     row.teamLeaderCells.forEach((c) => r.push({ v: c.text, s: c.color ? colorFills[c.color] : cellBorder }));
     row.reliefCells.forEach((c) => r.push({ v: c.text, s: c.color ? colorFills[c.color] : cellBorder }));
     r.push({ v: row.militaryCell.text, s: row.militaryCell.color ? colorFills[row.militaryCell.color] : cellBorder });
@@ -2184,35 +2201,45 @@ function exportMonthlyScheduleExcel(startDate, endDate) {
   // Merges: title row spans all columns
   ws["!merges"] = [
     { s: { r: 0, c: 0 }, e: { r: 0, c: totalCols - 1 } },
-    // Row 1-2: merge 工作天, 日期, 休假狀況 vertically
+    // Row 1-2: merge 工作天, 日期 vertically
     { s: { r: 1, c: 0 }, e: { r: 2, c: 0 } },
     { s: { r: 1, c: 1 }, e: { r: 2, c: 1 } },
-    { s: { r: 1, c: 2 }, e: { r: 2, c: 2 } },
-    // 特殊記載 spans 2 columns in row 1
-    { s: { r: 1, c: 3 }, e: { r: 1, c: 4 } },
-    // 台中併線 spans rows 1-2
-    { s: { r: 1, c: 5 }, e: { r: 2, c: 5 } },
+    // 休假狀況 spans leaveCols columns in row 1, and spans rows 1-2 for each sub-column
+    { s: { r: 1, c: 2 }, e: { r: 1, c: 2 + leaveCols - 1 } },
   ];
-  const colOffset = 6; // after 工作天, 日期, 休假狀況, 特殊記載x2, 併線
-  // Merge 組長 header if 2 columns
+  // Each leave sub-column header spans row 2 (empty, no merge needed individually)
+  const snCol = 2 + leaveCols; // 特殊記載 start column
+  // 特殊記載 spans 2 columns in row 1
+  ws["!merges"].push({ s: { r: 1, c: snCol }, e: { r: 1, c: snCol + 1 } });
+  const mlCol = snCol + 2; // 台中併線 column
+  // 台中併線 spans rows 1-2
+  ws["!merges"].push({ s: { r: 1, c: mlCol }, e: { r: 2, c: mlCol } });
+  const colOffset = mlCol + 1; // after 工作天, 日期, 休假狀況xN, 特殊記載x2, 併線
+  // Merge 組長 header if 2+ columns
   if (tlCount > 1) {
     ws["!merges"].push({ s: { r: 1, c: colOffset }, e: { r: 1, c: colOffset + tlCount - 1 } });
   }
-  // Merge 抵休 header if 2 columns
+  // Merge 抵休 header if 2+ columns
   if (rsCount > 1) {
     ws["!merges"].push({ s: { r: 1, c: colOffset + tlCount }, e: { r: 1, c: colOffset + tlCount + rsCount - 1 } });
   }
 
-  // Column widths (matching user-adjusted layout for landscape A4 print)
+  // Column widths — auto-fit to landscape A4
+  // Target total width ≈ 170 chars for landscape A4
+  // Fixed columns: 工作天(5) + 日期(8) + 特殊記載x2(8+8) + 併線(5) = 34
+  // Leave cols + remaining cols share the rest
+  const remainingCols = tlCount + rsCount + 2 + urbanCount;
+  const leaveW = Math.max(5, Math.min(8, Math.floor(50 / leaveCols)));  // each leave col
+  const otherW = Math.max(5, Math.min(13, Math.floor((170 - 34 - leaveCols * leaveW) / remainingCols)));
   ws["!cols"] = [
-    { wch: 8.78 },   // A: 工作天
-    { wch: 10.78 },  // B: 日期
-    { wch: 36.89 },  // C: 休假狀況
-    { wch: 10 },     // D: 特殊記載1
-    { wch: 10 },     // E: 特殊記載2
-    { wch: 10 },     // F: 台中併線
+    { wch: 5 },      // 工作天
+    { wch: 8 },      // 日期
   ];
-  for (let i = 0; i < tlCount + rsCount + 2 + urbanCount; i++) ws["!cols"].push({ wch: 13 });
+  for (let i = 0; i < leaveCols; i++) ws["!cols"].push({ wch: leaveW });
+  ws["!cols"].push({ wch: 8 });   // 特殊記載1
+  ws["!cols"].push({ wch: 8 });   // 特殊記載2
+  ws["!cols"].push({ wch: 5 });   // 台中併線
+  for (let i = 0; i < remainingCols; i++) ws["!cols"].push({ wch: otherW });
 
   // Row heights (matching user-adjusted layout)
   ws["!rows"] = [
