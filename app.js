@@ -2918,6 +2918,8 @@ function renderMasterDataPanel(currentUser) {
       action: "deleteEmployee",
       summary: `刪除員工 ${emp.name}`,
     });
+    // Extend echo delay to prevent Firebase listener from restoring deleted data
+    lastFirebaseSaveTime = Date.now() + 5000;
     saveState();
     render();
     window.alert(`已刪除員工「${emp.name}」。`);
