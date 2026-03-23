@@ -3443,7 +3443,7 @@ function render() {
   if (["teamLeader", "supervisor"].includes(currentUser.role)) {
     appEl.appendChild(renderSchedulingWorkbenchV2(currentUser));
   }
-  if (["adminStaff", "supervisor"].includes(currentUser.role)) {
+  if (currentUser.role === "supervisor") {
     appEl.appendChild(renderMasterDataPanel(currentUser));
   }
   if (["teamLeader", "supervisor"].includes(currentUser.role)) {
