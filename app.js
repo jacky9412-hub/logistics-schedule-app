@@ -2813,7 +2813,10 @@ function renderMasterDataPanel(currentUser) {
         </select>
       </label>
       <label>支援路線（可多選）<select name="supportLineIds" multiple>${sortedRoutes().map((route) => `<option value="${route.id}">${route.name}</option>`).join("")}</select></label>
-      <button type="submit">儲存員工</button>
+      <div class="action-row">
+        <button type="submit">儲存員工</button>
+        <button type="button" class="ghost" id="deleteEmployeeButton" style="color:#c0392b;border-color:#c0392b;">刪除員工</button>
+      </div>
     </form>
   `;
 
@@ -2896,6 +2899,28 @@ function renderMasterDataPanel(currentUser) {
   employeePanel.querySelector("#resetEmployeeButton").addEventListener("click", () => {
     employeeForm.reset();
     employeeForm.elements.employeeId.value = "";
+  });
+  employeePanel.querySelector("#deleteEmployeeButton").addEventListener("click", () => {
+    const empId = employeeForm.elements.employeeId.value || employeeForm.elements.existingEmployeeId.value;
+    if (!empId) { window.alert("請先選擇並載入一位員工，才能執行刪除。"); return; }
+    const emp = state.employees.find((e) => e.id === empId);
+    if (!emp) { window.alert("找不到該員工。"); return; }
+    if (!window.confirm(`確定要刪除員工「${emp.name}」嗎？\n\n此操作會一併刪除該員工所有的班表異動紀錄，且無法復原。`)) return;
+    // Remove employee
+    state.employees = state.employees.filter((e) => e.id !== empId);
+    // Remove related assignments
+    state.assignments = state.assignments.filter((a) => a.employeeId !== empId);
+    // Audit log
+    state.auditLog.push({
+      timestamp: new Date().toISOString(),
+      user: currentUser.name,
+      role: currentUser.role,
+      action: "deleteEmployee",
+      summary: `刪除員工 ${emp.name}`,
+    });
+    saveState();
+    render();
+    window.alert(`已刪除員工「${emp.name}」。`);
   });
   const empDetails = document.createElement("details");
   empDetails.className = "collapsible-list";
