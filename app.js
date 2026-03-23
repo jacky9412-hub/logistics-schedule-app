@@ -872,19 +872,19 @@ function buildMonthlyExportData(startDate, endDate) {
   // Column headers for display
   const teamLeaderHeaders = teamLeaders.map((e) => ({
     label: "組長",
-    name: e.name.replace(/^(.).*?(.)$/, "$1x$2"),
+    name: e.name,
   }));
   const reliefHeaders = reliefStaff.map((e) => ({
     label: "抵休",
-    name: e.name.replace(/^(.).*?(.)$/, "$1x$2"),
+    name: e.name,
   }));
   const militaryReliefHeader = {
     label: "軍功/抵休",
-    name: militaryRelief ? militaryRelief.name.replace(/^(.).*?(.)$/, "$1x$2") : "",
+    name: militaryRelief ? militaryRelief.name : "",
   };
   const eveningReliefHeader = {
     label: "晚班/抵休",
-    name: eveningRelief ? eveningRelief.name.replace(/^(.).*?(.)$/, "$1x$2") : "",
+    name: eveningRelief ? eveningRelief.name : "",
   };
 
   // Urban route owners
@@ -894,7 +894,7 @@ function buildMonthlyExportData(startDate, endDate) {
       routeName,
       shortName: routeName.replace("段", ""),
       owner,
-      ownerShortName: owner ? owner.name.replace(/^(.).*?(.)$/, "$1x$2") : "",
+      ownerShortName: owner ? owner.name : "",
     };
   });
 
@@ -987,7 +987,7 @@ function buildMonthlyExportData(startDate, endDate) {
         const covEmp = getEmployeeById(coverer.employeeId);
         if (covEmp) {
           // Show covering employee's short name
-          return { text: covEmp.name.replace(/^(.).*?(.)$/, "$1x$2"), color: "lightblue" };
+          return { text: covEmp.name, color: "lightblue" };
         }
       }
 
