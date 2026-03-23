@@ -2106,6 +2106,7 @@ function openMonthlySchedulePrintWindow(startDate, endDate) {
     table { width: 100%; border-collapse: collapse; background: #fffdf9; font-size: 12px; table-layout: fixed; }
     th, td { border: 1px solid #b0a090; padding: 2px 3px; text-align: center; vertical-align: middle; overflow: hidden; word-break: break-all; }
     th { background: #fff; font-size: 11px; color: #000; font-weight: bold; }
+    .note-row td { font-size: 12px; padding: 3px 5px; }
     /* Auto-fit text in cells */
     td .cell-text { display: inline-block; max-width: 100%; white-space: nowrap; }
     .btn-row { margin-bottom: 12px; }
@@ -2116,6 +2117,7 @@ function openMonthlySchedulePrintWindow(startDate, endDate) {
       .btn-row { display: none; }
       table { font-size: 9px; border: 1px solid #b0a090; }
       th, td { padding: 1px 2px; border: 1px solid #b0a090; }
+      .note-row td { font-size: 12px; padding: 3px 5px; }
       h1 { font-size: 14px; margin: 0 0 2px; }
       .subtitle { font-size: 10px; margin: 0 0 4px; }
     }
@@ -2133,7 +2135,7 @@ function openMonthlySchedulePrintWindow(startDate, endDate) {
       <tr>${headerRow3}</tr>
     </thead>
     <tbody>${dataRows}
-      <tr class="note-row"><td colspan="2" style="font-weight:bold;text-align:center;">備註</td><td colspan="${totalCols - 2}">${state.exportNote || ""}</td></tr>
+      <tr class="note-row"><td colspan="2" style="font-weight:bold;text-align:center;">備註</td><td colspan="${totalCols - 2}" style="text-align:left;white-space:pre-wrap;">${state.exportNote || ""}</td></tr>
     </tbody>
   </table>
   <script>
@@ -2357,7 +2359,7 @@ function exportMonthlyScheduleExcel(startDate, endDate) {
   // Add 備註 row at the end
   const noteRowIdx = allRows.length;
   const noteRow = [{ v: "備註", s: { ...cellBorder, font: { bold: true, sz: 10 } } }, { v: "", s: cellBorder }];
-  noteRow.push({ v: state.exportNote || "", s: cellBorder });
+  noteRow.push({ v: state.exportNote || "", s: { ...cellBorder, alignment: { horizontal: "left", vertical: "center", wrapText: true } } });
   for (let i = 3; i < totalCols; i++) noteRow.push({ v: "", s: cellBorder });
   allRows.push(noteRow);
   // Re-create sheet with updated allRows
