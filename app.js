@@ -1204,6 +1204,7 @@ function renderManagementLaunchers() {
         <button type="button" class="secondary" id="exportMonthlyPrintBtn">📋 匯出排班表 (列印)</button>
         <button type="button" class="secondary" id="exportMonthlyExcelBtn">📊 匯出排班表 (Excel)</button>
       </div>
+      <label style="margin-top:8px;">列印備註<textarea id="exportNoteInput" rows="2" placeholder="輸入備註文字，將顯示在匯出排班表最下方">${state.exportNote || ""}</textarea></label>
     </form>
   `;
   section.querySelector("#openDailyBoardTopButton").addEventListener("click", () => {
@@ -1223,6 +1224,11 @@ function renderManagementLaunchers() {
     const e = form.elements.endDate.value;
     if (!s || !e || s > e) { window.alert("請確認日期區間正確。"); return; }
     openLeaveSummaryWindow(s, e);
+  });
+  const exportNoteInput = section.querySelector("#exportNoteInput");
+  exportNoteInput.addEventListener("input", () => {
+    state.exportNote = exportNoteInput.value;
+    saveState();
   });
   section.querySelector("#exportMonthlyPrintBtn").addEventListener("click", () => {
     const form = section.querySelector("#rangeBoardForm");
@@ -2127,7 +2133,7 @@ function openMonthlySchedulePrintWindow(startDate, endDate) {
       <tr>${headerRow3}</tr>
     </thead>
     <tbody>${dataRows}
-      <tr class="note-row"><td colspan="2" style="font-weight:bold;text-align:center;">備註</td><td colspan="${totalCols - 2}"></td></tr>
+      <tr class="note-row"><td colspan="2" style="font-weight:bold;text-align:center;">備註</td><td colspan="${totalCols - 2}">${state.exportNote || ""}</td></tr>
     </tbody>
   </table>
   <script>
@@ -2351,7 +2357,8 @@ function exportMonthlyScheduleExcel(startDate, endDate) {
   // Add 備註 row at the end
   const noteRowIdx = allRows.length;
   const noteRow = [{ v: "備註", s: { ...cellBorder, font: { bold: true, sz: 10 } } }, { v: "", s: cellBorder }];
-  for (let i = 2; i < totalCols; i++) noteRow.push({ v: "", s: cellBorder });
+  noteRow.push({ v: state.exportNote || "", s: cellBorder });
+  for (let i = 3; i < totalCols; i++) noteRow.push({ v: "", s: cellBorder });
   allRows.push(noteRow);
   // Re-create sheet with updated allRows
   const wsUpdated = XLSX.utils.aoa_to_sheet(allRows);
