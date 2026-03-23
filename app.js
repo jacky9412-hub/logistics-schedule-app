@@ -813,11 +813,15 @@ function buildMonthlyExportData(startDate, endDate) {
     const dayAssignments = getAssignmentsByDate(dateStr);
     const allDateAssignments = state.assignments.filter((a) => a.date === dateStr);
 
-    // 休假狀況: collect who is on leave (2-char short name: 姓+名尾)
+    // 休假狀況: collect who is on leave (2-char short name: 姓+名尾) with leave type
     const leaveEntries = allDateAssignments.filter((a) => a.status === "leave");
     const leaveNames = leaveEntries.map((a) => {
       const emp = getEmployeeById(a.employeeId);
-      return emp ? emp.name.replace(/^(.).*?(.)$/, "$1$2") : "";
+      if (!emp) return null;
+      return {
+        name: emp.name.replace(/^(.).*?(.)$/, "$1$2"),
+        color: a.leaveType === "annual" ? "green" : "orange",
+      };
     }).filter(Boolean);
 
     // 特殊記載 & 併線
@@ -831,7 +835,7 @@ function buildMonthlyExportData(startDate, endDate) {
       const assignment = getAssignmentByEmployeeDate(emp.id, dateStr);
       if (!assignment) return { text: "", color: null };
       if (assignment.status === "leave") {
-        const colorType = (assignment.leaveType === "sick" || assignment.leaveType === "injury") ? "orange" : "green";
+        const colorType = assignment.leaveType === "annual" ? "green" : "orange";
         return { text: "X", color: colorType };
       }
       if (assignment.status === "reassigned" || assignment.source === "override") {
@@ -870,7 +874,7 @@ function buildMonthlyExportData(startDate, endDate) {
       if (!assignment) return { text: "", color: null };
 
       if (assignment.status === "leave") {
-        const colorType = (assignment.leaveType === "sick" || assignment.leaveType === "injury") ? "orange" : "green";
+        const colorType = assignment.leaveType === "annual" ? "green" : "orange";
         return { text: "X", color: colorType };
       }
 
@@ -1945,26 +1949,27 @@ function openMonthlySchedulePrintWindow(startDate, endDate) {
   const colorMap = { green: "#92D050", yellow: "#FFFF00", orange: "#FFC000", lightblue: "#B4D8E7" };
   const cellStyle = (cell) => cell.color ? `background:${colorMap[cell.color]};-webkit-print-color-adjust:exact;print-color-adjust:exact;` : "";
 
-  // Build header row 2 (group headers)
-  let headerRow2 = `<th rowspan="2">工作天</th><th rowspan="2">日期</th>`;
-  headerRow2 += `<th colspan="${leaveCols}" rowspan="1">休 假 狀 況</th>`;
-  headerRow2 += `<th colspan="2" rowspan="1" style="background:#e3f2fd;">特殊記載</th>`;
-  headerRow2 += `<th rowspan="2" style="background:#fce4ec;">台中<br>併線</th>`;
-  if (data.teamLeaderHeaders.length) headerRow2 += `<th colspan="${data.teamLeaderHeaders.length}" style="background:#00B0F0;color:#fff;">組長</th>`;
-  if (data.reliefHeaders.length) headerRow2 += `<th colspan="${data.reliefHeaders.length}" style="background:#FFFF00;">抵休</th>`;
-  headerRow2 += `<th style="background:#FFFF00;color:red;">軍功/抵休</th>`;
-  headerRow2 += `<th style="background:#FFFF00;color:red;">晚班/抵休</th>`;
-  data.urbanRouteInfos.forEach((info) => { headerRow2 += `<th>${info.shortName}</th>`; });
+  // Build header row 2 (group headers) — white bg, black bold text
+  const thStyle = 'background:#fff;color:#000;font-weight:bold;';
+  let headerRow2 = `<th rowspan="2" style="${thStyle}">工作天</th><th rowspan="2" style="${thStyle}">日期</th>`;
+  headerRow2 += `<th colspan="${leaveCols}" rowspan="1" style="${thStyle}">休 假 狀 況</th>`;
+  headerRow2 += `<th colspan="2" rowspan="1" style="${thStyle}">特殊記載</th>`;
+  headerRow2 += `<th rowspan="2" style="${thStyle}">台中<br>併線</th>`;
+  if (data.teamLeaderHeaders.length) headerRow2 += `<th colspan="${data.teamLeaderHeaders.length}" style="${thStyle}">組長</th>`;
+  if (data.reliefHeaders.length) headerRow2 += `<th colspan="${data.reliefHeaders.length}" style="${thStyle}">抵休</th>`;
+  headerRow2 += `<th style="${thStyle}">軍功/抵休</th>`;
+  headerRow2 += `<th style="${thStyle}">晚班/抵休</th>`;
+  data.urbanRouteInfos.forEach((info) => { headerRow2 += `<th style="${thStyle}">${info.shortName}</th>`; });
 
-  // Build header row 3 (employee names under group headers)
+  // Build header row 3 (employee names under group headers) — white bg, black bold text
   let headerRow3 = "";
-  for (let i = 0; i < leaveCols; i++) headerRow3 += `<th></th>`;
-  headerRow3 += `<th colspan="2" style="background:#e3f2fd;"></th>`;
-  data.teamLeaderHeaders.forEach((h) => { headerRow3 += `<th style="background:#00B0F0;color:#fff;">${h.name}</th>`; });
-  data.reliefHeaders.forEach((h) => { headerRow3 += `<th style="background:#FFFF00;">${h.name}</th>`; });
-  headerRow3 += `<th style="background:#FFFF00;">${data.militaryReliefHeader.name}</th>`;
-  headerRow3 += `<th style="background:#FFFF00;">${data.eveningReliefHeader.name}</th>`;
-  data.urbanRouteInfos.forEach((info) => { headerRow3 += `<th>${info.ownerShortName}</th>`; });
+  for (let i = 0; i < leaveCols; i++) headerRow3 += `<th style="${thStyle}"></th>`;
+  headerRow3 += `<th colspan="2" style="${thStyle}"></th>`;
+  data.teamLeaderHeaders.forEach((h) => { headerRow3 += `<th style="${thStyle}">${h.name}</th>`; });
+  data.reliefHeaders.forEach((h) => { headerRow3 += `<th style="${thStyle}">${h.name}</th>`; });
+  headerRow3 += `<th style="${thStyle}">${data.militaryReliefHeader.name}</th>`;
+  headerRow3 += `<th style="${thStyle}">${data.eveningReliefHeader.name}</th>`;
+  data.urbanRouteInfos.forEach((info) => { headerRow3 += `<th style="${thStyle}">${info.ownerShortName}</th>`; });
 
   // Build data rows
   let dataRows = "";
@@ -1972,12 +1977,17 @@ function openMonthlySchedulePrintWindow(startDate, endDate) {
     dataRows += "<tr>";
     dataRows += `<td style="text-align:center;font-weight:bold;">${row.workDay}</td>`;
     dataRows += `<td style="white-space:nowrap;font-weight:bold;">${row.date}</td>`;
-    // Each leave employee gets their own cell
+    // Each leave employee gets their own cell with leave-type color
     for (let i = 0; i < leaveCols; i++) {
-      dataRows += `<td>${row.leaveNames[i] || ""}</td>`;
+      const lv = row.leaveNames[i];
+      if (lv) {
+        dataRows += `<td style="background:${colorMap[lv.color]};-webkit-print-color-adjust:exact;print-color-adjust:exact;">${lv.name}</td>`;
+      } else {
+        dataRows += `<td></td>`;
+      }
     }
-    dataRows += `<td colspan="2" style="font-size:10px;background:#e3f2fd;">${(row.specialNotes || []).join("、")}</td>`;
-    dataRows += `<td style="background:#fce4ec;">${(row.mergedLineRoutes || []).join("")}</td>`;
+    dataRows += `<td colspan="2">${(row.specialNotes || []).join("、")}</td>`;
+    dataRows += `<td>${(row.mergedLineRoutes || []).join("")}</td>`;
     row.teamLeaderCells.forEach((c) => { dataRows += `<td style="${cellStyle(c)}">${c.text}</td>`; });
     row.reliefCells.forEach((c) => { dataRows += `<td style="${cellStyle(c)}">${c.text}</td>`; });
     dataRows += `<td style="${cellStyle(row.militaryCell)}">${row.militaryCell.text}</td>`;
@@ -1999,7 +2009,7 @@ function openMonthlySchedulePrintWindow(startDate, endDate) {
     .subtitle { margin: 0 0 12px; font-size: 13px; color: #6f6254; }
     table { width: 100%; border-collapse: collapse; background: #fffdf9; font-size: 12px; table-layout: fixed; }
     th, td { border: 1px solid #b0a090; padding: 2px 3px; text-align: center; vertical-align: middle; overflow: hidden; word-break: break-all; }
-    th { background: #f1e3d1; font-size: 11px; }
+    th { background: #fff; font-size: 11px; color: #000; font-weight: bold; }
     /* Auto-fit text in cells */
     td .cell-text { display: inline-block; max-width: 100%; white-space: nowrap; }
     .btn-row { margin-bottom: 12px; }
@@ -2115,12 +2125,9 @@ function exportMonthlyScheduleExcel(startDate, endDate) {
   const data = buildMonthlyExportData(startDate, endDate);
   const wb = XLSX.utils.book_new();
 
-  const headerStyle = { font: { bold: true, sz: 11 }, alignment: { horizontal: "center", vertical: "center" }, border: { top: { style: "thin" }, bottom: { style: "thin" }, left: { style: "thin" }, right: { style: "thin" } } };
+  const headerStyle = { font: { bold: true, sz: 11, color: { rgb: "000000" } }, alignment: { horizontal: "center", vertical: "center" }, border: { top: { style: "thin" }, bottom: { style: "thin" }, left: { style: "thin" }, right: { style: "thin" } }, fill: { fgColor: { rgb: "FFFFFF" } } };
   const titleStyle = { font: { bold: true, sz: 14 }, alignment: { horizontal: "center", vertical: "center" } };
   const cellBorder = { border: { top: { style: "thin" }, bottom: { style: "thin" }, left: { style: "thin" }, right: { style: "thin" } }, alignment: { horizontal: "center", vertical: "center", wrapText: true }, font: { sz: 10 } };
-  const blueHeader = { ...headerStyle, fill: { fgColor: { rgb: "00B0F0" } }, font: { bold: true, sz: 11, color: { rgb: "FFFFFF" } } };
-  const yellowHeader = { ...headerStyle, fill: { fgColor: { rgb: "FFFF00" } } };
-  const yellowRedHeader = { ...headerStyle, fill: { fgColor: { rgb: "FFFF00" } }, font: { bold: true, sz: 11, color: { rgb: "FF0000" } } };
 
   const colorFills = {
     green: { ...cellBorder, fill: { fgColor: { rgb: "92D050" } } },
@@ -2135,9 +2142,6 @@ function exportMonthlyScheduleExcel(startDate, endDate) {
   const urbanCount = data.urbanRouteInfos.length;
   const leaveCols = data.maxLeaveCount;
   const totalCols = 2 + leaveCols + 2 + 1 + tlCount + rsCount + 1 + 1 + urbanCount;
-  const specialNoteStyle = { ...headerStyle, fill: { fgColor: { rgb: "E3F2FD" } } };
-  const mergedLineStyle = { ...headerStyle, fill: { fgColor: { rgb: "FCE4EC" } } };
-
   // Row 0: Title
   const row0 = [{ v: `${data.title}　${data.subtitle}`, s: titleStyle }];
   for (let i = 1; i < totalCols; i++) row0.push({ v: "", s: titleStyle });
@@ -2150,13 +2154,13 @@ function exportMonthlyScheduleExcel(startDate, endDate) {
   // 休假狀況 spans leaveCols columns
   row1.push({ v: "休假狀況", s: headerStyle });
   for (let i = 1; i < leaveCols; i++) row1.push({ v: "", s: headerStyle });
-  row1.push({ v: "特殊記載", s: specialNoteStyle });
-  row1.push({ v: "", s: specialNoteStyle });
-  row1.push({ v: "台中併線", s: mergedLineStyle });
-  data.teamLeaderHeaders.forEach((h) => row1.push({ v: "組長", s: blueHeader }));
-  data.reliefHeaders.forEach((h) => row1.push({ v: "抵休", s: yellowHeader }));
-  row1.push({ v: "軍功/抵休", s: yellowRedHeader });
-  row1.push({ v: "晚班/抵休", s: yellowRedHeader });
+  row1.push({ v: "特殊記載", s: headerStyle });
+  row1.push({ v: "", s: headerStyle });
+  row1.push({ v: "台中併線", s: headerStyle });
+  data.teamLeaderHeaders.forEach((h) => row1.push({ v: "組長", s: headerStyle }));
+  data.reliefHeaders.forEach((h) => row1.push({ v: "抵休", s: headerStyle }));
+  row1.push({ v: "軍功/抵休", s: headerStyle });
+  row1.push({ v: "晚班/抵休", s: headerStyle });
   data.urbanRouteInfos.forEach((info) => row1.push({ v: info.shortName, s: headerStyle }));
 
   // Row 2: Employee names
@@ -2165,13 +2169,13 @@ function exportMonthlyScheduleExcel(startDate, endDate) {
     { v: "", s: headerStyle },
   ];
   for (let i = 0; i < leaveCols; i++) row2.push({ v: "", s: headerStyle });
-  row2.push({ v: "", s: specialNoteStyle });
-  row2.push({ v: "", s: specialNoteStyle });
-  row2.push({ v: "", s: mergedLineStyle });
-  data.teamLeaderHeaders.forEach((h) => row2.push({ v: h.name, s: blueHeader }));
-  data.reliefHeaders.forEach((h) => row2.push({ v: h.name, s: yellowHeader }));
-  row2.push({ v: data.militaryReliefHeader.name, s: yellowHeader });
-  row2.push({ v: data.eveningReliefHeader.name, s: yellowHeader });
+  row2.push({ v: "", s: headerStyle });
+  row2.push({ v: "", s: headerStyle });
+  row2.push({ v: "", s: headerStyle });
+  data.teamLeaderHeaders.forEach((h) => row2.push({ v: h.name, s: headerStyle }));
+  data.reliefHeaders.forEach((h) => row2.push({ v: h.name, s: headerStyle }));
+  row2.push({ v: data.militaryReliefHeader.name, s: headerStyle });
+  row2.push({ v: data.eveningReliefHeader.name, s: headerStyle });
   data.urbanRouteInfos.forEach((info) => row2.push({ v: info.ownerShortName, s: headerStyle }));
 
   // Data rows
@@ -2181,13 +2185,18 @@ function exportMonthlyScheduleExcel(startDate, endDate) {
       { v: row.workDay, s: { ...cellBorder, font: { bold: true, sz: 10 } } },
       { v: row.date, s: { ...cellBorder, font: { bold: true, sz: 10 } } },
     ];
-    // Each leave employee gets their own cell
+    // Each leave employee gets their own cell with leave-type color
     for (let i = 0; i < leaveCols; i++) {
-      r.push({ v: row.leaveNames[i] || "", s: cellBorder });
+      const lv = row.leaveNames[i];
+      if (lv) {
+        r.push({ v: lv.name, s: lv.color ? colorFills[lv.color] : cellBorder });
+      } else {
+        r.push({ v: "", s: cellBorder });
+      }
     }
-    r.push({ v: (row.specialNotes || []).join("、"), s: { ...cellBorder, fill: { fgColor: { rgb: "E3F2FD" } }, font: { sz: 9 } } });
-    r.push({ v: "", s: { ...cellBorder, fill: { fgColor: { rgb: "E3F2FD" } }, font: { sz: 9 } } });
-    r.push({ v: (row.mergedLineRoutes || []).join(""), s: { ...cellBorder, fill: { fgColor: { rgb: "FCE4EC" } }, font: { sz: 9 } } });
+    r.push({ v: (row.specialNotes || []).join("、"), s: { ...cellBorder, font: { sz: 9 } } });
+    r.push({ v: "", s: { ...cellBorder, font: { sz: 9 } } });
+    r.push({ v: (row.mergedLineRoutes || []).join(""), s: { ...cellBorder, font: { sz: 9 } } });
     row.teamLeaderCells.forEach((c) => r.push({ v: c.text, s: c.color ? colorFills[c.color] : cellBorder }));
     row.reliefCells.forEach((c) => r.push({ v: c.text, s: c.color ? colorFills[c.color] : cellBorder }));
     r.push({ v: row.militaryCell.text, s: row.militaryCell.color ? colorFills[row.militaryCell.color] : cellBorder });
