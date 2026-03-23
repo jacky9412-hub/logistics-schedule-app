@@ -1,4 +1,5 @@
 const STORAGE_KEY = "logistics-schedule-app-state-v7";
+const SESSION_AUTH_KEY = "logistics-schedule-auth-cache";
 
 // ─── Firebase Configuration ───
 const firebaseConfig = {
@@ -508,6 +509,32 @@ const protectedRoles = ["teamLeader", "adminStaff", "supervisor"];
 // authenticatedUsers tracks which individual users have been verified (by employee ID)
 const authenticatedUsers = new Set();
 
+// ─── Session Auth Cache (sessionStorage) ───
+function loadAuthCache() {
+  try {
+    const raw = sessionStorage.getItem(SESSION_AUTH_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
+}
+
+function saveAuthCache() {
+  const toggle = document.querySelector("#keepLoggedInToggle");
+  const cached = loadAuthCache();
+  const keepLoggedIn = toggle ? toggle.checked : (cached && cached.keepLoggedIn);
+  if (!keepLoggedIn) return;
+  sessionStorage.setItem(SESSION_AUTH_KEY, JSON.stringify({
+    keepLoggedIn: true,
+    role: state.session.role,
+    userId: state.session.userId,
+    authenticatedRoles: [...authenticatedRoles],
+    authenticatedUsers: [...authenticatedUsers],
+  }));
+}
+
+function clearAuthCache() {
+  sessionStorage.removeItem(SESSION_AUTH_KEY);
+}
+
 function getEmployeePin(employeeId) {
   // Individual PIN takes priority; fallback to role-level PIN
   if (state.pinSettings.individual && state.pinSettings.individual[employeeId]) {
@@ -564,6 +591,7 @@ async function requirePin(role) {
   if (pin === null) return false;
   if (pin === state.pinSettings[role]) {
     authenticatedRoles.add(role);
+    saveAuthCache();
     return true;
   }
   window.alert("PIN 碼錯誤，無法切換至該角色。");
@@ -582,6 +610,7 @@ async function requireUserPin(employeeId) {
   if (pin === correctPin) {
     authenticatedUsers.add(employeeId);
     authenticatedRoles.add(emp.role);
+    saveAuthCache();
     return true;
   }
   window.alert("PIN 碼錯誤，無法切換至此帳號。");
@@ -592,6 +621,8 @@ const appEl = document.querySelector("#app");
 const roleSelect = document.querySelector("#roleSelect");
 const userSelect = document.querySelector("#userSelect");
 const roleHint = document.querySelector("#roleHint");
+const keepLoggedInToggle = document.querySelector("#keepLoggedInToggle");
+const keepLoggedInLabel = document.querySelector("#keepLoggedInLabel");
 const statCardTemplate = document.querySelector("#statCardTemplate");
 
 let firebaseInitialized = false; // true after first Firebase load completes
@@ -2995,6 +3026,7 @@ function renderMasterDataPanel(currentUser) {
       // Clear authenticated cache so new PINs take effect
       authenticatedUsers.clear();
       authenticatedRoles.clear();
+      clearAuthCache();
       saveState();
       window.alert("PIN 碼已更新。下次切換帳號時將使用新的 PIN 碼。");
     });
@@ -3423,6 +3455,16 @@ function renderAuditPanel() {
 }
 function render() {
   syncSelectors();
+  // Show/hide keep-logged-in toggle based on role
+  const isProtectedRole = protectedRoles.includes(state.session.role);
+  keepLoggedInLabel.style.display = isProtectedRole ? "" : "none";
+  if (isProtectedRole) {
+    const cached = loadAuthCache();
+    keepLoggedInToggle.checked = !!(cached && cached.keepLoggedIn);
+  } else {
+    keepLoggedInToggle.checked = false;
+  }
+
   const currentUser = getEmployeeById(state.session.userId) || getRoleUsers(state.session.role)[0];
   if (!currentUser) {
     appEl.innerHTML = `<section class="card empty-state"><h2>找不到可用的登入人員</h2><p>請先到基本資料建立員工，或切換角色後再試一次。</p></section>`;
@@ -3485,6 +3527,7 @@ roleSelect.addEventListener("change", async (event) => {
   state.session.role = newRole;
   state.session.userId = targetUserId;
   saveState();
+  saveAuthCache();
   render();
 });
 
@@ -3499,14 +3542,30 @@ userSelect.addEventListener("change", async (event) => {
   }
   state.session.userId = newUserId;
   saveState();
+  saveAuthCache();
   render();
 });
 
+keepLoggedInToggle.addEventListener("change", () => {
+  if (keepLoggedInToggle.checked) {
+    saveAuthCache();
+  } else {
+    clearAuthCache();
+  }
+});
+
 if (protectedRoles.includes(state.session.role)) {
-  state.session.role = "operator";
-  const users = getRoleUsers("operator");
-  state.session.userId = users[0]?.id || "";
-  saveState();
+  const cached = loadAuthCache();
+  if (cached && cached.keepLoggedIn && cached.role === state.session.role && cached.userId === state.session.userId) {
+    (cached.authenticatedRoles || []).forEach(r => authenticatedRoles.add(r));
+    (cached.authenticatedUsers || []).forEach(u => authenticatedUsers.add(u));
+  } else {
+    state.session.role = "operator";
+    const users = getRoleUsers("operator");
+    state.session.userId = users[0]?.id || "";
+    saveState();
+    clearAuthCache();
+  }
 }
 
 // Initial render with localStorage data

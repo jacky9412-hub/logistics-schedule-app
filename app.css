@@ -632,3 +632,19 @@ tr:last-child td {
   font-size: 0.95rem !important;
   font-weight: 600 !important;
 }
+
+.keep-logged-in-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.85rem;
+  color: var(--muted);
+  cursor: pointer;
+  margin-top: 4px;
+}
+
+.keep-logged-in-label input[type="checkbox"] {
+  accent-color: var(--primary, #2563eb);
+  width: 16px;
+  height: 16px;
+}
