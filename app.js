@@ -820,6 +820,13 @@ function buildMonthlyExportData(startDate, endDate) {
       return emp ? emp.name.replace(/^(.).*?(.)$/, "$1x$2") : "";
     }).filter(Boolean);
 
+    // 特殊記載 & 併線
+    const specialNotes = [...new Set(allDateAssignments.filter((a) => a.specialNote).map((a) => a.specialNote))];
+    const mergedLineRoutes = [...new Set(allDateAssignments.filter((a) => a.isMergedLine).map((a) => {
+      const r = getRouteById(a.routeId);
+      return r ? r.name : "是";
+    }))];
+
     // Helper: get what an employee is doing on this date
     const getEmployeeAction = (emp) => {
       if (!emp) return { text: "", color: null };
@@ -904,6 +911,8 @@ function buildMonthlyExportData(startDate, endDate) {
       date: `${dateDisplay}(${weekday})`,
       dateRaw: dateStr,
       leaveNames,
+      specialNotes,
+      mergedLineRoutes,
       teamLeaderCells,
       reliefCells,
       militaryCell,
@@ -1096,6 +1105,8 @@ function renderManagementLaunchers() {
       <div class="action-row">
         <button type="submit">查看選擇區間班表</button>
         <button type="button" class="secondary" id="openLeaveSummaryButton">查看休假總表</button>
+        <button type="button" class="secondary" id="exportExcelButton">匯出 Excel</button>
+        <button type="button" class="secondary" id="openPrintBoardButton">列印排班表</button>
       </div>
       <div class="action-row" style="margin-top:8px;">
         <button type="button" class="secondary" id="exportMonthlyPrintBtn">📋 匯出排班表 (列印)</button>
@@ -1374,11 +1385,12 @@ function renderSchedulingWorkbenchV2(currentUser) {
     <form id="reliefOnlyForm" class="form-grid">
       <label>代班開始日期<input name="startDate" type="date" value="${getToday()}"></label>
       <label>代班結束日期<input name="endDate" type="date" value="${getToday()}"></label>
-      <label>被代班員工（請假者）<select name="originalEmployeeId">${employeeOptions({ includeAll: true })}</select></label>
       <label>代班人員<select name="reliefEmployeeId">${employeeOptions({ includeReliefOnly: true })}</select></label>
-      <label>代班路線（上午 / 主要）<select name="routeId"><option value="">沿用請假者固定路線</option>${routeOptions()}</select></label>
-      <label>併線路線（下午）<select name="secondaryRouteId"><option value="">無（不併線）</option>${routeOptions()}</select></label>
-      <label>備註<textarea name="note" placeholder="例如：支援大夜班、臨時調度、併線"></textarea></label>
+      <label>代班路線（上午 / 主要）<select name="routeId">${routeOptions()}</select></label>
+      <label>併線<select name="isMergedLine"><option value="no">否</option><option value="yes">是</option></select></label>
+      <label class="merged-route-label" style="display:none;">併線路線（下午）<select name="secondaryRouteId"><option value="">無（不併線）</option>${routeOptions()}</select></label>
+      <label>特殊記載<textarea name="specialNote" placeholder="例如：預交提出、月底提出"></textarea></label>
+      <label>備註<textarea name="note" placeholder="例如：支援大夜班、臨時調度"></textarea></label>
       <button type="submit">儲存代班</button>
     </form>
   `;
@@ -1439,9 +1451,9 @@ function renderSchedulingWorkbenchV2(currentUser) {
                 <span class="pill ${a.status === "leave" ? "alert" : ""}">${getLabel("statuses", a.status)}</span>
                 ${a.leaveType ? `<span class="pill alert">${getLabel("leaveTypes", a.leaveType)}</span>` : ""}
                 <span class="pill">${a.source === "default" ? "固定配置" : "異動覆蓋"}</span>
-                ${secRoute ? `<span class="pill alert">併線</span>` : ""}
+                ${a.isMergedLine ? `<span class="pill alert">併線</span>` : ""}
               </div>
-              <p class="muted" style="margin:0;">路線：${route ? route.name : "未指定"}${secRoute ? ` ｜ 併線：${secRoute.name}` : ""} ｜ 備註：${a.note || "無"}</p>
+              <p class="muted" style="margin:0;">路線：${route ? route.name : "未指定"}${secRoute ? ` ｜ 併線：${secRoute.name}` : ""}${a.specialNote ? ` ｜ 特殊記載：${a.specialNote}` : ""} ｜ 備註：${a.note || "無"}</p>
             </div>
             <div style="display:flex;gap:6px;flex-shrink:0;">
               <button type="button" class="secondary editSingleButton" data-asg-id="${a.id}">編輯</button>
@@ -1481,7 +1493,9 @@ function renderSchedulingWorkbenchV2(currentUser) {
             <label>假別<select name="leaveType">${Object.entries(state.labelSettings.leaveTypes).map(([k, v]) => `<option value="${k}" ${asg.leaveType === k ? "selected" : ""}>${v}</option>`).join("")}<option value="" ${!asg.leaveType ? "selected" : ""}>無</option></select></label>
             <label>班別<select name="shift">${Object.entries(state.labelSettings.shifts).map(([k, v]) => `<option value="${k}" ${asg.shift === k ? "selected" : ""}>${v}</option>`).join("")}</select></label>
             <label>路線（上午 / 主要）<select name="routeId">${sortedRoutes().map((r) => `<option value="${r.id}" ${asg.routeId === r.id ? "selected" : ""}>${r.name}</option>`).join("")}</select></label>
+            <label>併線<select name="isMergedLine"><option value="no" ${!asg.isMergedLine ? "selected" : ""}>否</option><option value="yes" ${asg.isMergedLine ? "selected" : ""}>是</option></select></label>
             <label>併線路線（下午）<select name="secondaryRouteId"><option value="" ${!asg.secondaryRouteId ? "selected" : ""}>無（不併線）</option>${sortedRoutes().map((r) => `<option value="${r.id}" ${asg.secondaryRouteId === r.id ? "selected" : ""}>${r.name}</option>`).join("")}</select></label>
+            <label>特殊記載<textarea name="specialNote">${asg.specialNote || ""}</textarea></label>
             <label>備註<textarea name="note">${asg.note || ""}</textarea></label>
             <button type="submit">儲存修改</button>
           </form>`;
@@ -1500,7 +1514,9 @@ function renderSchedulingWorkbenchV2(currentUser) {
           target.leaveType = fd.get("status") === "leave" ? fd.get("leaveType") : "";
           target.shift = fd.get("shift");
           target.routeId = fd.get("routeId");
-          target.secondaryRouteId = fd.get("secondaryRouteId") || "";
+          target.isMergedLine = fd.get("isMergedLine") === "yes";
+          target.secondaryRouteId = target.isMergedLine ? (fd.get("secondaryRouteId") || "") : "";
+          target.specialNote = (fd.get("specialNote") || "").trim();
           target.note = (fd.get("note") || "").trim();
           target.source = "override";
           logAction({
@@ -1576,6 +1592,15 @@ function renderSchedulingWorkbenchV2(currentUser) {
     event.preventDefault();
     const changed = applyLeaveOnly(new FormData(event.currentTarget), currentUser);
     if (changed) render();
+  });
+
+  const mergedToggle = reliefForm.querySelector('[name="isMergedLine"]');
+  const mergedRouteLabel = reliefForm.querySelector('.merged-route-label');
+  mergedToggle.addEventListener("change", () => {
+    mergedRouteLabel.style.display = mergedToggle.value === "yes" ? "" : "none";
+    if (mergedToggle.value === "no") {
+      mergedRouteLabel.querySelector('[name="secondaryRouteId"]').value = "";
+    }
   });
 
   reliefForm.querySelector("#reliefOnlyForm").addEventListener("submit", (event) => {
@@ -1916,13 +1941,15 @@ function openMonthlySchedulePrintWindow(startDate, endDate) {
   const popup = window.open("", `monthly-schedule-${startDate}-${endDate}`, "width=1600,height=900,scrollbars=yes,resizable=yes");
   if (!popup) { window.alert("請先允許瀏覽器開啟彈出視窗。"); return; }
 
-  const totalCols = 3 + data.teamLeaderHeaders.length + data.reliefHeaders.length + 1 + 1 + data.urbanRouteInfos.length;
+  const totalCols = 3 + 2 + 1 + data.teamLeaderHeaders.length + data.reliefHeaders.length + 1 + 1 + data.urbanRouteInfos.length;
 
   const colorMap = { green: "#92D050", yellow: "#FFFF00", orange: "#FFC000", lightblue: "#B4D8E7" };
   const cellStyle = (cell) => cell.color ? `background:${colorMap[cell.color]};-webkit-print-color-adjust:exact;print-color-adjust:exact;` : "";
 
   // Build header row 2 (group headers)
   let headerRow2 = `<th rowspan="2" style="width:40px;">工作天</th><th rowspan="2" style="width:70px;">日期</th><th rowspan="2" style="min-width:100px;">休假狀況</th>`;
+  headerRow2 += `<th colspan="2" rowspan="1" style="background:#e3f2fd;">特殊記載</th>`;
+  headerRow2 += `<th rowspan="2" style="background:#fce4ec;">台中<br>併線</th>`;
   if (data.teamLeaderHeaders.length) headerRow2 += `<th colspan="${data.teamLeaderHeaders.length}" style="background:#00B0F0;color:#fff;">組長</th>`;
   if (data.reliefHeaders.length) headerRow2 += `<th colspan="${data.reliefHeaders.length}" style="background:#FFFF00;">抵休</th>`;
   headerRow2 += `<th style="background:#FFFF00;color:red;">軍功/抵休</th>`;
@@ -1930,7 +1957,7 @@ function openMonthlySchedulePrintWindow(startDate, endDate) {
   data.urbanRouteInfos.forEach((info) => { headerRow2 += `<th>${info.shortName}</th>`; });
 
   // Build header row 3 (employee names)
-  let headerRow3 = "";
+  let headerRow3 = `<th colspan="2" style="background:#e3f2fd;"></th>`;
   data.teamLeaderHeaders.forEach((h) => { headerRow3 += `<th style="background:#00B0F0;color:#fff;">${h.name}</th>`; });
   data.reliefHeaders.forEach((h) => { headerRow3 += `<th style="background:#FFFF00;">${h.name}</th>`; });
   headerRow3 += `<th style="background:#FFFF00;">${data.militaryReliefHeader.name}</th>`;
@@ -1944,6 +1971,8 @@ function openMonthlySchedulePrintWindow(startDate, endDate) {
     dataRows += `<td style="text-align:center;font-weight:bold;">${row.workDay}</td>`;
     dataRows += `<td style="white-space:nowrap;font-weight:bold;">${row.date}</td>`;
     dataRows += `<td style="font-size:11px;">${row.leaveNames.join("、")}</td>`;
+    dataRows += `<td colspan="2" style="font-size:10px;background:#e3f2fd;">${(row.specialNotes || []).join("、")}</td>`;
+    dataRows += `<td style="font-size:10px;background:#fce4ec;">${(row.mergedLineRoutes || []).join("、")}</td>`;
     row.teamLeaderCells.forEach((c) => { dataRows += `<td style="${cellStyle(c)}">${c.text}</td>`; });
     row.reliefCells.forEach((c) => { dataRows += `<td style="${cellStyle(c)}">${c.text}</td>`; });
     dataRows += `<td style="${cellStyle(row.militaryCell)}">${row.militaryCell.text}</td>`;
@@ -2026,7 +2055,9 @@ function exportMonthlyScheduleExcel(startDate, endDate) {
   const tlCount = data.teamLeaderHeaders.length;
   const rsCount = data.reliefHeaders.length;
   const urbanCount = data.urbanRouteInfos.length;
-  const totalCols = 3 + tlCount + rsCount + 1 + 1 + urbanCount;
+  const totalCols = 3 + 2 + 1 + tlCount + rsCount + 1 + 1 + urbanCount;
+  const specialNoteStyle = { ...headerStyle, fill: { fgColor: { rgb: "E3F2FD" } } };
+  const mergedLineStyle = { ...headerStyle, fill: { fgColor: { rgb: "FCE4EC" } } };
 
   // Row 0: Title
   const row0 = [{ v: `${data.title}　${data.subtitle}`, s: titleStyle }];
@@ -2037,6 +2068,9 @@ function exportMonthlyScheduleExcel(startDate, endDate) {
     { v: "工作天", s: headerStyle },
     { v: "日期", s: headerStyle },
     { v: "休假狀況", s: headerStyle },
+    { v: "特殊記載", s: specialNoteStyle },
+    { v: "", s: specialNoteStyle },
+    { v: "台中併線", s: mergedLineStyle },
   ];
   data.teamLeaderHeaders.forEach((h) => row1.push({ v: "組長", s: blueHeader }));
   data.reliefHeaders.forEach((h) => row1.push({ v: "抵休", s: yellowHeader }));
@@ -2049,6 +2083,9 @@ function exportMonthlyScheduleExcel(startDate, endDate) {
     { v: "", s: headerStyle },
     { v: "", s: headerStyle },
     { v: "", s: headerStyle },
+    { v: "", s: specialNoteStyle },
+    { v: "", s: specialNoteStyle },
+    { v: "", s: mergedLineStyle },
   ];
   data.teamLeaderHeaders.forEach((h) => row2.push({ v: h.name, s: blueHeader }));
   data.reliefHeaders.forEach((h) => row2.push({ v: h.name, s: yellowHeader }));
@@ -2063,6 +2100,9 @@ function exportMonthlyScheduleExcel(startDate, endDate) {
       { v: row.workDay, s: { ...cellBorder, font: { bold: true, sz: 10 } } },
       { v: row.date, s: { ...cellBorder, font: { bold: true, sz: 10 } } },
       { v: row.leaveNames.join("、"), s: { ...cellBorder, alignment: { horizontal: "left", vertical: "center", wrapText: true }, font: { sz: 9 } } },
+      { v: (row.specialNotes || []).join("、"), s: { ...cellBorder, fill: { fgColor: { rgb: "E3F2FD" } }, font: { sz: 9 } } },
+      { v: "", s: { ...cellBorder, fill: { fgColor: { rgb: "E3F2FD" } }, font: { sz: 9 } } },
+      { v: (row.mergedLineRoutes || []).join("、"), s: { ...cellBorder, fill: { fgColor: { rgb: "FCE4EC" } }, font: { sz: 9 } } },
     ];
     row.teamLeaderCells.forEach((c) => r.push({ v: c.text, s: c.color ? colorFills[c.color] : cellBorder }));
     row.reliefCells.forEach((c) => r.push({ v: c.text, s: c.color ? colorFills[c.color] : cellBorder }));
@@ -2081,14 +2121,19 @@ function exportMonthlyScheduleExcel(startDate, endDate) {
     { s: { r: 1, c: 0 }, e: { r: 2, c: 0 } },
     { s: { r: 1, c: 1 }, e: { r: 2, c: 1 } },
     { s: { r: 1, c: 2 }, e: { r: 2, c: 2 } },
+    // 特殊記載 spans 2 columns in row 1
+    { s: { r: 1, c: 3 }, e: { r: 1, c: 4 } },
+    // 台中併線 spans rows 1-2
+    { s: { r: 1, c: 5 }, e: { r: 2, c: 5 } },
   ];
+  const colOffset = 6; // after 工作天, 日期, 休假狀況, 特殊記載x2, 併線
   // Merge 組長 header if 2 columns
   if (tlCount > 1) {
-    ws["!merges"].push({ s: { r: 1, c: 3 }, e: { r: 1, c: 3 + tlCount - 1 } });
+    ws["!merges"].push({ s: { r: 1, c: colOffset }, e: { r: 1, c: colOffset + tlCount - 1 } });
   }
   // Merge 抵休 header if 2 columns
   if (rsCount > 1) {
-    ws["!merges"].push({ s: { r: 1, c: 3 + tlCount }, e: { r: 1, c: 3 + tlCount + rsCount - 1 } });
+    ws["!merges"].push({ s: { r: 1, c: colOffset + tlCount }, e: { r: 1, c: colOffset + tlCount + rsCount - 1 } });
   }
 
   // Column widths (matching user-adjusted layout for landscape A4 print)
@@ -2096,6 +2141,9 @@ function exportMonthlyScheduleExcel(startDate, endDate) {
     { wch: 8.78 },   // A: 工作天
     { wch: 10.78 },  // B: 日期
     { wch: 36.89 },  // C: 休假狀況
+    { wch: 10 },     // D: 特殊記載1
+    { wch: 10 },     // E: 特殊記載2
+    { wch: 10 },     // F: 台中併線
   ];
   for (let i = 0; i < tlCount + rsCount + 2 + urbanCount; i++) ws["!cols"].push({ wch: 13 });
 
@@ -2283,6 +2331,339 @@ function openRangeBoardWindow(startDate, endDate) {
   popup.document.close();
   popup.focus();
 }
+
+function buildScheduleData(startDate, endDate) {
+  const allDates = enumerateDates(startDate, endDate);
+  const workDays = allDates.filter((d) => !isHoliday(d));
+  const activeEmployees = state.employees
+    .filter((emp) => emp.employmentStatus === "active")
+    .sort(compareEmployeesByScheduleOrder);
+  const routes = state.routes.slice();
+
+  const rows = [];
+  let dayCount = 0;
+
+  workDays.forEach((dateString) => {
+    dayCount += 1;
+    const dateObj = new Date(`${dateString}T00:00:00`);
+    const m = dateObj.getMonth() + 1;
+    const d = dateObj.getDate();
+
+    const leaveNames = [];
+    const specialLeaveItems = [];
+    let specialNotes = [];
+    let mergedLineRoutes = [];
+
+    const routeAssignments = {};
+    routes.forEach((r) => { routeAssignments[r.id] = ""; });
+
+    activeEmployees.forEach((emp) => {
+      const assignment = getDisplayAssignment(emp, dateString);
+      if (!assignment) return;
+
+      if (assignment.status === "leave") {
+        const leaveTypeLabel = assignment.leaveType ? getLabel("leaveTypes", assignment.leaveType) : "";
+        if (assignment.leaveType === "official" || assignment.leaveType === "injury") {
+          specialLeaveItems.push(`${emp.name}${leaveTypeLabel}`);
+        } else {
+          leaveNames.push(emp.name);
+        }
+      }
+
+      if (assignment.specialNote) {
+        specialNotes.push(assignment.specialNote);
+      }
+
+      if (assignment.isMergedLine) {
+        const secRoute = assignment.secondaryRouteId ? getRouteById(assignment.secondaryRouteId) : null;
+        const priRoute = getRouteById(assignment.routeId);
+        mergedLineRoutes.push(priRoute ? priRoute.name : (secRoute ? secRoute.name : "是"));
+      }
+
+      if (assignment.status !== "leave" && assignment.routeId) {
+        const route = getRouteById(assignment.routeId);
+        if (route && routeAssignments.hasOwnProperty(route.id)) {
+          const secRoute = assignment.secondaryRouteId ? getRouteById(assignment.secondaryRouteId) : null;
+          let cellText = route.name;
+          if (secRoute) {
+            cellText = `${route.name}+${secRoute.name.replace(/段$/, "")}`;
+          }
+          if (assignment.source === "override" || assignment.source === "default-preview") {
+            routeAssignments[route.id] = cellText;
+          }
+        }
+        if (assignment.secondaryRouteId) {
+          const secRoute = getRouteById(assignment.secondaryRouteId);
+          if (secRoute && routeAssignments.hasOwnProperty(secRoute.id)) {
+            if (!routeAssignments[secRoute.id]) {
+              routeAssignments[secRoute.id] = secRoute.name;
+            }
+          }
+        }
+      }
+    });
+
+    rows.push({
+      dayNumber: dayCount,
+      date: dateString,
+      dateDisplay: `${m}/${d}`,
+      leaveNames,
+      specialLeaveItems,
+      specialNotes: [...new Set(specialNotes)],
+      mergedLineRoutes: [...new Set(mergedLineRoutes)],
+      routeAssignments,
+    });
+  });
+
+  return { rows, routes, workDays, activeEmployees };
+}
+
+function generateExcelExport(startDate, endDate) {
+  if (typeof XLSX === "undefined") {
+    window.alert("Excel 匯出功能載入失敗，請重新整理頁面後再試。");
+    return;
+  }
+
+  const data = buildScheduleData(startDate, endDate);
+  const { rows, routes } = data;
+
+  const maxLeave = 6;
+  const specialLeaveCols = 2;
+  const specialNoteCols = 2;
+  const mergedLineCols = 1;
+
+  const routeStartCol = 2 + maxLeave + specialLeaveCols + specialNoteCols + mergedLineCols;
+
+  const wb = XLSX.utils.book_new();
+  const wsData = [];
+
+  const startDateObj = new Date(`${startDate}T00:00:00`);
+  const rocYear = startDateObj.getFullYear() - 1911;
+  const monthNum = startDateObj.getMonth() + 1;
+
+  const teamLeader = state.employees.find((emp) => emp.role === "teamLeader" && emp.employmentStatus === "active");
+  const today = getToday();
+  const todayObj = new Date(`${today}T00:00:00`);
+  const rocToday = `${todayObj.getFullYear() - 1911}.${String(todayObj.getMonth() + 1).padStart(2, "0")}.${String(todayObj.getDate()).padStart(2, "0")}`;
+
+  const row0 = [];
+  row0[0] = "";
+  row0[4] = `${rocYear} 年 ${String(monthNum).padStart(2, "0")} 月份`;
+  row0[routeStartCol] = `台中辦事處  抵休代班、學線  排程表           值班組長：${teamLeader ? teamLeader.name : ""}   更新日期：${rocToday}`;
+  wsData.push(row0);
+
+  const row1 = [];
+  row1[0] = "工作天";
+  row1[1] = "日期";
+  row1[2] = "休 假 狀 況";
+  row1[2 + maxLeave] = "";
+  row1[2 + maxLeave + specialLeaveCols] = "特殊記載";
+  row1[2 + maxLeave + specialLeaveCols + specialNoteCols] = "台中併線";
+  routes.forEach((r, i) => {
+    row1[routeStartCol + i] = r.name;
+  });
+  wsData.push(row1);
+
+  const row2 = [];
+  row2[2] = "特休/補休";
+  row2[2 + maxLeave] = "特殊事況休假";
+  routes.forEach((r, i) => {
+    const owner = state.employees.find((emp) => {
+      if (emp.employmentStatus !== "active") return false;
+      const dr = getDefaultRoute(emp);
+      return dr && dr.id === r.id;
+    });
+    row2[routeStartCol + i] = owner ? owner.name : "";
+  });
+  wsData.push(row2);
+
+  rows.forEach((row) => {
+    const r = [];
+    r[0] = row.dayNumber;
+    r[1] = row.dateDisplay;
+
+    row.leaveNames.forEach((name, i) => {
+      if (i < maxLeave) r[2 + i] = name;
+    });
+
+    row.specialLeaveItems.forEach((item, i) => {
+      if (i < specialLeaveCols) r[2 + maxLeave + i] = item;
+    });
+
+    row.specialNotes.forEach((note, i) => {
+      if (i < specialNoteCols) r[2 + maxLeave + specialLeaveCols + i] = note;
+    });
+
+    if (row.mergedLineRoutes.length > 0) {
+      r[2 + maxLeave + specialLeaveCols + specialNoteCols] = row.mergedLineRoutes.join("、");
+    }
+
+    routes.forEach((route, i) => {
+      const val = row.routeAssignments[route.id];
+      if (val) r[routeStartCol + i] = val;
+    });
+
+    wsData.push(r);
+  });
+
+  const lastRow = [];
+  lastRow[0] = "";
+  wsData.push(lastRow);
+
+  const ws = XLSX.utils.aoa_to_sheet(wsData);
+
+  const totalCols = routeStartCol + routes.length;
+  ws["!cols"] = [];
+  ws["!cols"][0] = { wch: 6 };
+  ws["!cols"][1] = { wch: 10 };
+  for (let i = 2; i < 2 + maxLeave; i++) ws["!cols"][i] = { wch: 8 };
+  for (let i = 2 + maxLeave; i < 2 + maxLeave + specialLeaveCols; i++) ws["!cols"][i] = { wch: 12 };
+  for (let i = 2 + maxLeave + specialLeaveCols; i < 2 + maxLeave + specialLeaveCols + specialNoteCols; i++) ws["!cols"][i] = { wch: 10 };
+  ws["!cols"][2 + maxLeave + specialLeaveCols + specialNoteCols] = { wch: 10 };
+  for (let i = 0; i < routes.length; i++) ws["!cols"][routeStartCol + i] = { wch: 12 };
+
+  ws["!merges"] = [
+    { s: { r: 0, c: 4 }, e: { r: 0, c: routeStartCol - 1 } },
+    { s: { r: 0, c: routeStartCol }, e: { r: 0, c: totalCols - 1 } },
+    { s: { r: 1, c: 2 }, e: { r: 1, c: 2 + maxLeave + specialLeaveCols - 1 } },
+    { s: { r: 2, c: 2 }, e: { r: 2, c: 2 + maxLeave - 1 } },
+    { s: { r: 2, c: 2 + maxLeave }, e: { r: 2, c: 2 + maxLeave + specialLeaveCols - 1 } },
+    { s: { r: 1, c: 2 + maxLeave + specialLeaveCols }, e: { r: 1, c: 2 + maxLeave + specialLeaveCols + specialNoteCols - 1 } },
+  ];
+
+  const sheetName = `${rocYear}年${monthNum}月`;
+  XLSX.utils.book_append_sheet(wb, ws, sheetName);
+
+  const fileName = `${rocYear}年${String(monthNum).padStart(2, "0")}月份抵休代班排程表.xlsx`;
+  XLSX.writeFile(wb, fileName);
+}
+
+function openPrintBoardWindow(startDate, endDate) {
+  const data = buildScheduleData(startDate, endDate);
+  const { rows, routes } = data;
+
+  const maxLeave = 6;
+  const specialLeaveCols = 2;
+  const specialNoteCols = 2;
+  const mergedLineCols = 1;
+
+  const startDateObj = new Date(`${startDate}T00:00:00`);
+  const rocYear = startDateObj.getFullYear() - 1911;
+  const monthNum = startDateObj.getMonth() + 1;
+  const teamLeader = state.employees.find((emp) => emp.role === "teamLeader" && emp.employmentStatus === "active");
+  const today = getToday();
+  const todayObj = new Date(`${today}T00:00:00`);
+  const rocToday = `${todayObj.getFullYear() - 1911}.${String(todayObj.getMonth() + 1).padStart(2, "0")}.${String(todayObj.getDate()).padStart(2, "0")}`;
+
+  const routeHeaders = routes.map((r) => {
+    const owner = state.employees.find((emp) => {
+      if (emp.employmentStatus !== "active") return false;
+      const dr = getDefaultRoute(emp);
+      return dr && dr.id === r.id;
+    });
+    return `<th><div>${r.name}</div><small>${owner ? owner.name : ""}</small></th>`;
+  }).join("");
+
+  const dataRows = rows.map((row) => {
+    const leaveCells = [];
+    for (let i = 0; i < maxLeave; i++) {
+      leaveCells.push(`<td>${row.leaveNames[i] || ""}</td>`);
+    }
+    const specialLeaveCells = [];
+    for (let i = 0; i < specialLeaveCols; i++) {
+      specialLeaveCells.push(`<td class="special-leave">${row.specialLeaveItems[i] || ""}</td>`);
+    }
+    const specialNoteCells = [];
+    for (let i = 0; i < specialNoteCols; i++) {
+      specialNoteCells.push(`<td class="special-note">${row.specialNotes[i] || ""}</td>`);
+    }
+    const mergedCell = `<td class="merged-line">${row.mergedLineRoutes.join("、") || ""}</td>`;
+
+    const routeCells = routes.map((r) => {
+      const val = row.routeAssignments[r.id] || "";
+      return `<td>${val}</td>`;
+    }).join("");
+
+    return `<tr>
+      <td class="day-num">${row.dayNumber}</td>
+      <td class="date-cell">${row.dateDisplay}</td>
+      ${leaveCells.join("")}
+      ${specialLeaveCells.join("")}
+      ${specialNoteCells.join("")}
+      ${mergedCell}
+      ${routeCells}
+    </tr>`;
+  }).join("");
+
+  const popup = window.open("", `print-board-${startDate}-${endDate}`, "width=1600,height=900,scrollbars=yes,resizable=yes");
+  if (!popup) {
+    window.alert("請先允許瀏覽器開啟彈出視窗。");
+    return;
+  }
+
+  popup.document.open();
+  popup.document.write(`<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <title>排班表 ${startDate} ~ ${endDate}</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: "Microsoft JhengHei", "Noto Sans TC", sans-serif; padding: 12px; background: #fff; color: #000; font-size: 11px; }
+    h1 { font-size: 16px; text-align: center; margin-bottom: 2px; }
+    .sub-title { text-align: center; font-size: 11px; color: #555; margin-bottom: 10px; }
+    .board-wrap { overflow: auto; }
+    table { border-collapse: collapse; width: 100%; table-layout: auto; font-size: 10px; }
+    th, td { border: 1px solid #999; padding: 3px 4px; text-align: center; vertical-align: middle; white-space: nowrap; }
+    thead th { background: #e8e8e8; font-weight: 700; }
+    thead th small { display: block; font-weight: 400; font-size: 9px; color: #555; }
+    .day-num { width: 30px; }
+    .date-cell { width: 50px; }
+    .special-leave { background: #fff3e0; }
+    .special-note { background: #e3f2fd; }
+    .merged-line { background: #fce4ec; }
+    @media print {
+      body { padding: 4px; font-size: 9px; }
+      table { font-size: 8px; }
+      th, td { padding: 2px 3px; }
+      .no-print { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <h1>${rocYear} 年 ${String(monthNum).padStart(2, "0")} 月份 抵休代班學線排程表</h1>
+  <p class="sub-title">台中辦事處　值班組長：${teamLeader ? teamLeader.name : ""}　更新日期：${rocToday}</p>
+  <div style="margin:8px 0;" class="no-print">
+    <button onclick="window.print()">列印</button>
+  </div>
+  <div class="board-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th rowspan="2">工作天</th>
+          <th rowspan="2">日期</th>
+          <th colspan="${maxLeave + specialLeaveCols}">休 假 狀 況</th>
+          <th colspan="${specialNoteCols}" rowspan="1">特殊記載</th>
+          <th rowspan="2">台中<br>併線</th>
+          ${routeHeaders}
+        </tr>
+        <tr>
+          <th colspan="${maxLeave}">特休/補休</th>
+          <th colspan="${specialLeaveCols}">特殊事況休假</th>
+          <th colspan="${specialNoteCols}"></th>
+        </tr>
+      </thead>
+      <tbody>
+        ${dataRows}
+      </tbody>
+    </table>
+  </div>
+</body>
+</html>`);
+  popup.document.close();
+  popup.focus();
+}
+
 function generateDefaultAssignments(formData, currentUser) {
   const payload = Object.fromEntries(formData.entries());
   if (payload.startDate > payload.endDate) {
@@ -2499,15 +2880,8 @@ function applyLeaveOnly(formData, currentUser) {
 
 function applyReliefOnly(formData, currentUser) {
   const payload = Object.fromEntries(formData.entries());
-  const originalEmployee = getEmployeeById(payload.originalEmployeeId);
   const reliefEmployee = getEmployeeById(payload.reliefEmployeeId);
-  if (!originalEmployee) { window.alert("請選擇被代班員工。"); return false; }
   if (!reliefEmployee) { window.alert("請選擇代班人員。"); return false; }
-
-  if (originalEmployee.id === reliefEmployee.id) {
-    window.alert("被代班員工與代班人員不能是同一人。");
-    return false;
-  }
 
   const startDate = payload.startDate;
   const endDate = payload.endDate;
@@ -2521,13 +2895,15 @@ function applyReliefOnly(formData, currentUser) {
   }
 
   const route = payload.routeId ? getRouteById(payload.routeId) : null;
-  const secondaryRoute = payload.secondaryRouteId ? getRouteById(payload.secondaryRouteId) : null;
-  const defaultRoute = getDefaultRoute(originalEmployee);
-  const reliefRouteId = route ? route.id : (defaultRoute ? defaultRoute.id : "");
+  if (!route) { window.alert("請選擇代班路線。"); return false; }
+  const isMergedLine = payload.isMergedLine === "yes";
+  const secondaryRoute = (isMergedLine && payload.secondaryRouteId) ? getRouteById(payload.secondaryRouteId) : null;
+  const reliefRouteId = route.id;
   const secondaryRouteId = secondaryRoute ? secondaryRoute.id : "";
   const isMerged = !!secondaryRouteId;
-  const shift = route ? inferShift(route.name) : (defaultRoute ? originalEmployee.shift : "day");
-  let note = (payload.note || "").trim() || `${originalEmployee.name} 休假代班`;
+  const shift = inferShift(route.name);
+  const specialNote = (payload.specialNote || "").trim();
+  let note = (payload.note || "").trim() || "代班";
   if (isMerged && !note.includes("併線")) {
     note += "（併線）";
   }
@@ -2545,10 +2921,12 @@ function applyReliefOnly(formData, currentUser) {
     if (reliefExisting) {
       reliefExisting.routeId = reliefRouteId;
       reliefExisting.secondaryRouteId = secondaryRouteId;
+      reliefExisting.isMergedLine = isMergedLine;
       reliefExisting.shift = shift;
       reliefExisting.status = "reassigned";
       reliefExisting.leaveType = "";
       reliefExisting.note = note;
+      reliefExisting.specialNote = specialNote;
       reliefExisting.source = "override";
     } else {
       state.assignments.push({
@@ -2557,10 +2935,12 @@ function applyReliefOnly(formData, currentUser) {
         employeeId: reliefEmployee.id,
         routeId: reliefRouteId,
         secondaryRouteId,
+        isMergedLine,
         shift,
         status: "reassigned",
         leaveType: "",
         note,
+        specialNote,
         source: "override",
       });
     }
@@ -2573,18 +2953,18 @@ function applyReliefOnly(formData, currentUser) {
     return false;
   }
 
-  const mergedInfo = isMerged ? `（併線：上午 ${route?.name || "固定路線"} / 下午 ${secondaryRoute.name}）` : "";
+  const mergedInfo = isMerged ? `（併線：上午 ${route.name} / 下午 ${secondaryRoute.name}）` : "";
   logAction({
     actorId: currentUser.id,
     action: "relief",
     targetType: "assignment",
     targetId: reliefEmployee.id,
-    summary: `${reliefEmployee.name} 代班 ${originalEmployee.name}，${startDate} 至 ${endDate}${isMerged ? "（併線）" : ""}`,
-    detail: `${route ? `路線 ${route.name}` : `沿用 ${originalEmployee.name} 固定路線`}${mergedInfo}。套用 ${processed} 天${skippedHoliday ? `，略過假日 ${skippedHoliday} 天` : ""}。`,
+    summary: `${reliefEmployee.name} 代班，${startDate} 至 ${endDate}${isMergedLine ? "（併線）" : ""}`,
+    detail: `路線 ${route.name}${mergedInfo}。套用 ${processed} 天${skippedHoliday ? `，略過假日 ${skippedHoliday} 天` : ""}。${specialNote ? `特殊記載：${specialNote}` : ""}`,
   });
 
   saveState();
-  window.alert(`代班已儲存。\n${reliefEmployee.name} 代班 ${originalEmployee.name}\n套用工作日 ${processed} 天${skippedHoliday ? `\n略過假日 ${skippedHoliday} 天` : ""}`);
+  window.alert(`代班已儲存。\n${reliefEmployee.name} 代班\n路線：${route.name}\n套用工作日 ${processed} 天${skippedHoliday ? `\n略過假日 ${skippedHoliday} 天` : ""}`);
   return true;
 }
 
