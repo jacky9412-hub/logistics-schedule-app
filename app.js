@@ -845,8 +845,10 @@ function getRouteByName(name) {
 }
 
 function getRouteOwner(routeName) {
-  const seed = routeSeeds.find((r) => r.name === routeName);
-  return seed ? getEmployeeByName(seed.owner) : null;
+  const route = state.routes.find((r) => r.name === routeName);
+  if (!route) return null;
+  const owner = state.employees.find((e) => e.defaultRouteId === route.id);
+  return owner || null;
 }
 
 function buildMonthlyExportData(startDate, endDate) {
