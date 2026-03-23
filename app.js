@@ -820,7 +820,7 @@ function buildMonthlyExportData(startDate, endDate) {
       if (!emp) return null;
       return {
         name: emp.name.replace(/^(.).*?(.)$/, "$1$2"),
-        color: a.leaveType === "annual" ? "green" : "orange",
+        color: a.leaveType === "annual" ? "green" : "yellow",
       };
     }).filter(Boolean);
 
@@ -835,7 +835,7 @@ function buildMonthlyExportData(startDate, endDate) {
       const assignment = getAssignmentByEmployeeDate(emp.id, dateStr);
       if (!assignment) return { text: "", color: null };
       if (assignment.status === "leave") {
-        const colorType = assignment.leaveType === "annual" ? "green" : "orange";
+        const colorType = assignment.leaveType === "annual" ? "green" : "yellow";
         return { text: "X", color: colorType };
       }
       if (assignment.status === "reassigned" || assignment.source === "override") {
@@ -874,7 +874,7 @@ function buildMonthlyExportData(startDate, endDate) {
       if (!assignment) return { text: "", color: null };
 
       if (assignment.status === "leave") {
-        const colorType = assignment.leaveType === "annual" ? "green" : "orange";
+        const colorType = assignment.leaveType === "annual" ? "green" : "yellow";
         return { text: "X", color: colorType };
       }
 
