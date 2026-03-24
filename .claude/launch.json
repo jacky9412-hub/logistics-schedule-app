@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "app",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["-e", "const http=require('http');const fs=require('fs');const path=require('path');const root=process.cwd();const port=3030;const types={'.html':'text/html; charset=utf-8','.css':'text/css; charset=utf-8','.js':'application/javascript; charset=utf-8','.json':'application/json; charset=utf-8','.svg':'image/svg+xml; charset=utf-8'};http.createServer((req,res)=>{const urlPath=req.url==='/'?'/index.html':req.url;const clean=path.normalize(urlPath).replace(/^(\\.\\.[\\/\\\\])+/, '');const filePath=path.join(root, clean);if(!filePath.startsWith(root)){res.writeHead(403);res.end('Forbidden');return;}fs.readFile(filePath,(err,data)=>{if(err){res.writeHead(err.code==='ENOENT'?404:500);res.end(err.code==='ENOENT'?'Not Found':'Server Error');return;}res.writeHead(200,{'Content-Type':types[path.extname(filePath).toLowerCase()]||'application/octet-stream'});res.end(data);});}).listen(port,()=>console.log('http://localhost:'+port));"],
+      "port": 3030
+    }
+  ]
+}
