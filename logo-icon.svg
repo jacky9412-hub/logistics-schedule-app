@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 108 156" width="108" height="156">
+  <defs>
+    <linearGradient id="greenGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#2a9d8f"/>
+      <stop offset="50%" style="stop-color:#1d6b63"/>
+      <stop offset="100%" style="stop-color:#145a53"/>
+    </linearGradient>
+    <filter id="glow">
+      <feDropShadow dx="0" dy="2" stdDeviation="4" flood-color="#1d6b6330"/>
+    </filter>
+  </defs>
+  <g filter="url(#glow)">
+    <path d="M54,8 C72,8 86,18 90,36 C94,56 88,80 74,100
+             C64,114 54,126 54,140
+             C54,126 44,114 34,100
+             C20,80 14,56 18,36
+             C22,18 36,8 54,8 Z"
+          fill="url(#greenGrad)" opacity="0.95"/>
+    <path d="M36,48 Q54,42 72,48" fill="none" stroke="#a8e6cf" stroke-width="2.5" stroke-linecap="round" opacity="0.7"/>
+    <path d="M32,64 Q54,56 76,64" fill="none" stroke="#a8e6cf" stroke-width="2.5" stroke-linecap="round" opacity="0.6"/>
+    <path d="M34,80 Q54,72 74,80" fill="none" stroke="#a8e6cf" stroke-width="2.5" stroke-linecap="round" opacity="0.5"/>
+    <polyline points="40,94 50,106 68,86" fill="none" stroke="#e8faf0" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="54" cy="26" r="5" fill="#a8e6cf" opacity="0.8"/>
+  </g>
+</svg>
