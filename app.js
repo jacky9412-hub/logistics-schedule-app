@@ -1892,7 +1892,7 @@ function openDailyBoardWindow() {
   popup.focus();
 }
 function openMileageTableWindow() {
-  const canEdit = ["teamLeader", "adminStaff", "supervisor"].includes(state.session.role);
+  const canEdit = state.session.role === "supervisor";
   const data = state.mileageTable || [];
   const rows = data.map((item) => {
     const amClass = item.am === "X" ? ' class="na-cell"' : "";
@@ -3724,7 +3724,7 @@ function render() {
   if (["teamLeader", "supervisor"].includes(currentUser.role)) {
     appEl.appendChild(renderHistoryQueryPanel(currentUser));
   }
-  if (["adminStaff", "supervisor"].includes(currentUser.role)) {
+  if (currentUser.role === "supervisor") {
     appEl.appendChild(renderDataManagementPanel(currentUser));
   }
   if (currentUser.role === "supervisor") {
