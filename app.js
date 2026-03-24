@@ -940,9 +940,17 @@ function buildMonthlyExportData(startDate, endDate) {
               const secRoute = getRouteById(assignment.secondaryRouteId);
               if (secRoute) text = `(上)${route.name}\n(下)${secRoute.name}`;
             }
+            if (assignment.abcSection) text += assignment.abcSection;
             return { text, color: "yellow" };
           }
+          // On default route but has abcSection
+          if (assignment.abcSection) {
+            return { text: assignment.abcSection, color: null };
+          }
         }
+      }
+      if (assignment.abcSection) {
+        return { text: assignment.abcSection, color: null };
       }
       return { text: "", color: null };
     };
@@ -975,7 +983,13 @@ function buildMonthlyExportData(startDate, endDate) {
         const route = getRouteById(assignment.routeId);
         const defaultRoute = getDefaultRoute(info.owner);
         if (route && defaultRoute && route.id !== defaultRoute.id) {
-          return { text: route.name, color: "yellow" };
+          let text = route.name;
+          if (assignment.abcSection) text += assignment.abcSection;
+          return { text, color: "yellow" };
+        }
+        // On default route but has abcSection
+        if (assignment.abcSection) {
+          return { text: assignment.abcSection, color: null };
         }
       }
 
@@ -993,6 +1007,9 @@ function buildMonthlyExportData(startDate, endDate) {
         }
       }
 
+      if (assignment.abcSection) {
+        return { text: assignment.abcSection, color: null };
+      }
       return { text: "", color: null };
     });
 
@@ -1489,6 +1506,7 @@ function renderSchedulingWorkbenchV2(currentUser) {
       <label>代班路線（上午 / 主要）<select name="routeId">${routeOptions()}</select></label>
       <label>併線<select name="isMergedLine"><option value="no">否</option><option value="yes">是</option></select></label>
       <label class="merged-route-label" style="display:none;">併線路線（下午）<select name="secondaryRouteId"><option value="">無（不併線）</option>${routeOptions()}</select></label>
+      <label>ABC段<select name="abcSection"><option value="">無</option><option value="A">A</option><option value="B">B</option><option value="C">C</option></select></label>
       <label>特殊記載<textarea name="specialNote" placeholder="例如：預交提出、月底提出"></textarea></label>
       <label>備註<textarea name="note" placeholder="例如：支援大夜班、臨時調度"></textarea></label>
       <button type="submit">儲存代班</button>
@@ -1553,7 +1571,7 @@ function renderSchedulingWorkbenchV2(currentUser) {
                 <span class="pill">${a.source === "default" ? "固定配置" : "異動覆蓋"}</span>
                 ${a.isMergedLine ? `<span class="pill alert">併線</span>` : ""}
               </div>
-              <p class="muted" style="margin:0;">路線：${route ? route.name : "未指定"}${secRoute ? ` ｜ 併線：${secRoute.name}` : ""}${a.specialNote ? ` ｜ 特殊記載：${a.specialNote}` : ""} ｜ 備註：${a.note || "無"}</p>
+              <p class="muted" style="margin:0;">路線：${route ? route.name : "未指定"}${secRoute ? ` ｜ 併線：${secRoute.name}` : ""}${a.abcSection ? ` ｜ ABC段：${a.abcSection}` : ""}${a.specialNote ? ` ｜ 特殊記載：${a.specialNote}` : ""} ｜ 備註：${a.note || "無"}</p>
             </div>
             <div style="display:flex;gap:6px;flex-shrink:0;">
               <button type="button" class="secondary editSingleButton" data-asg-id="${a.id}">編輯</button>
@@ -1595,6 +1613,7 @@ function renderSchedulingWorkbenchV2(currentUser) {
             <label>路線（上午 / 主要）<select name="routeId">${sortedRoutes().map((r) => `<option value="${r.id}" ${asg.routeId === r.id ? "selected" : ""}>${r.name}</option>`).join("")}</select></label>
             <label>併線<select name="isMergedLine"><option value="no" ${!asg.isMergedLine ? "selected" : ""}>否</option><option value="yes" ${asg.isMergedLine ? "selected" : ""}>是</option></select></label>
             <label>併線路線（下午）<select name="secondaryRouteId"><option value="" ${!asg.secondaryRouteId ? "selected" : ""}>無（不併線）</option>${sortedRoutes().map((r) => `<option value="${r.id}" ${asg.secondaryRouteId === r.id ? "selected" : ""}>${r.name}</option>`).join("")}</select></label>
+            <label>ABC段<select name="abcSection"><option value="" ${!asg.abcSection ? "selected" : ""}>無</option><option value="A" ${asg.abcSection === "A" ? "selected" : ""}>A</option><option value="B" ${asg.abcSection === "B" ? "selected" : ""}>B</option><option value="C" ${asg.abcSection === "C" ? "selected" : ""}>C</option></select></label>
             <label>特殊記載<textarea name="specialNote">${asg.specialNote || ""}</textarea></label>
             <label>備註<textarea name="note">${asg.note || ""}</textarea></label>
             <button type="submit">儲存修改</button>
@@ -1618,6 +1637,7 @@ function renderSchedulingWorkbenchV2(currentUser) {
           target.secondaryRouteId = target.isMergedLine ? (fd.get("secondaryRouteId") || "") : "";
           target.specialNote = (fd.get("specialNote") || "").trim();
           target.note = (fd.get("note") || "").trim();
+          target.abcSection = (fd.get("abcSection") || "").trim();
           target.source = "override";
           logAction({
             actorId: currentUser.id,
@@ -2774,6 +2794,7 @@ function applyReliefOnly(formData, currentUser) {
   const secondaryRouteId = secondaryRoute ? secondaryRoute.id : "";
   const isMerged = !!secondaryRouteId;
   const shift = inferShift(route.name);
+  const abcSection = (payload.abcSection || "").trim();
   const specialNote = (payload.specialNote || "").trim();
   let note = (payload.note || "").trim() || "代班";
   if (isMerged && !note.includes("併線")) {
@@ -2799,6 +2820,7 @@ function applyReliefOnly(formData, currentUser) {
       reliefExisting.leaveType = "";
       reliefExisting.note = note;
       reliefExisting.specialNote = specialNote;
+      reliefExisting.abcSection = abcSection;
       reliefExisting.source = "override";
     } else {
       state.assignments.push({
@@ -2813,6 +2835,7 @@ function applyReliefOnly(formData, currentUser) {
         leaveType: "",
         note,
         specialNote,
+        abcSection,
         source: "override",
       });
     }
