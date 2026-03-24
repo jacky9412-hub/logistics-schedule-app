@@ -23,7 +23,7 @@ const FIREBASE_ECHO_DELAY = 3000; // Ignore listener echoes within 3 seconds of 
 // Firebase converts arrays to objects; this ensures they stay arrays
 function ensureArrays(data) {
   if (!data) return data;
-  const arrayFields = ["employees", "routes", "assignments", "auditLogs"];
+  const arrayFields = ["employees", "routes", "assignments", "auditLogs", "dateSpecialNotes"];
   arrayFields.forEach((field) => {
     if (data[field] && !Array.isArray(data[field])) {
       data[field] = Object.values(data[field]);
@@ -554,6 +554,9 @@ function loadState() {
     if (!parsed.mileageTable) {
       parsed.mileageTable = buildInitialState().mileageTable;
     }
+    if (!parsed.dateSpecialNotes) {
+      parsed.dateSpecialNotes = [];
+    }
     return parsed;
   } catch (error) {
     return buildInitialState();
@@ -917,7 +920,11 @@ function buildMonthlyExportData(startDate, endDate) {
     }).filter(Boolean);
 
     // 特殊記載 & 併線
-    const specialNotes = [...new Set(allDateAssignments.filter((a) => a.specialNote).map((a) => a.specialNote))];
+    const assignmentNotes = allDateAssignments.filter((a) => a.specialNote).map((a) => a.specialNote);
+    const dateNotes = (state.dateSpecialNotes || [])
+      .filter((n) => dateStr >= n.startDate && dateStr <= n.endDate)
+      .map((n) => n.note);
+    const specialNotes = [...new Set([...dateNotes, ...assignmentNotes])];
     const hasMergedLine = allDateAssignments.some((a) => a.isMergedLine);
     const mergedLineRoutes = hasMergedLine ? ["★"] : [];
 
@@ -1531,7 +1538,25 @@ function renderSchedulingWorkbenchV2(currentUser) {
     <div id="editResultArea"></div>
   `;
 
-  grid.append(defaultForm, leaveForm, reliefForm, editPanel);
+  const specialNotePanel = document.createElement("div");
+  specialNotePanel.className = "card panel";
+  specialNotePanel.innerHTML = `
+    <div class="section-heading">
+      <div>
+        <h3>特殊記載</h3>
+        <p class="muted">不影響排班，僅在列印排班表的「特殊記載」欄位顯示備註文字。</p>
+      </div>
+    </div>
+    <form id="dateSpecialNoteForm" class="form-grid">
+      <label>開始日期<input name="startDate" type="date" value="${getToday()}"></label>
+      <label>結束日期<input name="endDate" type="date" value="${getToday()}"></label>
+      <label>特殊記載<textarea name="noteText" placeholder="例如：票交所兩人、總公司開會"></textarea></label>
+      <button type="submit">儲存特殊記載</button>
+    </form>
+    <div id="dateSpecialNoteList" style="margin-top:12px;"></div>
+  `;
+
+  grid.append(defaultForm, leaveForm, reliefForm, editPanel, specialNotePanel);
   section.appendChild(grid);
 
   editPanel.querySelector("#editLookupButton").addEventListener("click", () => {
@@ -1728,6 +1753,65 @@ function renderSchedulingWorkbenchV2(currentUser) {
     const changed = applyReliefOnly(new FormData(event.currentTarget), currentUser);
     if (changed) render();
   });
+
+  // 特殊記載表單
+  specialNotePanel.querySelector("#dateSpecialNoteForm").addEventListener("submit", (event) => {
+    event.preventDefault();
+    const fd = new FormData(event.currentTarget);
+    const startDate = fd.get("startDate");
+    const endDate = fd.get("endDate");
+    const noteText = (fd.get("noteText") || "").trim();
+    if (!startDate || !endDate) { window.alert("請選擇日期區間。"); return; }
+    if (startDate > endDate) { window.alert("結束日期不可早於開始日期。"); return; }
+    if (!noteText) { window.alert("請輸入特殊記載內容。"); return; }
+    if (!state.dateSpecialNotes) state.dateSpecialNotes = [];
+    state.dateSpecialNotes.push({
+      id: makeId("dsn"),
+      startDate,
+      endDate,
+      note: noteText,
+    });
+    logAction({
+      actorId: currentUser.id,
+      action: "date-special-note",
+      targetType: "dateSpecialNote",
+      targetId: `${startDate}~${endDate}`,
+      summary: `新增特殊記載 ${startDate} ~ ${endDate}`,
+      detail: noteText,
+    });
+    saveState();
+    window.alert(`特殊記載已儲存。\n${formatDate(startDate)} ~ ${formatDate(endDate)}\n${noteText}`);
+    render();
+  });
+
+  // 顯示已存的特殊記載列表
+  const noteListArea = specialNotePanel.querySelector("#dateSpecialNoteList");
+  const existingNotes = (state.dateSpecialNotes || []).slice().sort((a, b) => b.startDate.localeCompare(a.startDate));
+  if (existingNotes.length) {
+    noteListArea.innerHTML = `<p style="margin:0 0 6px;font-weight:700;">已儲存的特殊記載（${existingNotes.length} 筆）</p>` +
+      existingNotes.map((n) => `
+        <div class="card stat-card" style="margin-top:6px;" data-dsn-id="${n.id}">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;">
+            <div>
+              <p class="stat-label">${formatDate(n.startDate)} ~ ${formatDate(n.endDate)}</p>
+              <p class="muted" style="margin:0;">${n.note}</p>
+            </div>
+            <button type="button" class="warn deleteDsnButton" data-dsn-id="${n.id}">刪除</button>
+          </div>
+        </div>`).join("");
+    noteListArea.querySelectorAll(".deleteDsnButton").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const id = btn.dataset.dsnId;
+        const note = state.dateSpecialNotes.find((n) => n.id === id);
+        if (!note) return;
+        if (!window.confirm(`確定要刪除 ${formatDate(note.startDate)} ~ ${formatDate(note.endDate)} 的特殊記載嗎？\n\n${note.note}`)) return;
+        state.dateSpecialNotes = state.dateSpecialNotes.filter((n) => n.id !== id);
+        saveState();
+        window.alert("特殊記載已刪除。");
+        render();
+      });
+    });
+  }
 
   return section;
 }
