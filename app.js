@@ -1496,14 +1496,14 @@ function renderSchedulingWorkbenchV2(currentUser) {
     <div class="section-heading">
       <div>
         <h3>派遣代班</h3>
-        <p class="muted">針對已請假的員工，分段指派不同代班人員。可多次操作。</p>
+        <p class="muted">針對已請假的員工，分段指派不同代班人員；或為固定班別員工指派 ABC 段。</p>
       </div>
     </div>
     <form id="reliefOnlyForm" class="form-grid">
       <label>代班開始日期<input name="startDate" type="date" value="${getToday()}"></label>
       <label>代班結束日期<input name="endDate" type="date" value="${getToday()}"></label>
-      <label>代班人員<select name="reliefEmployeeId">${employeeOptions({ includeReliefOnly: true })}</select></label>
-      <label>代班路線（上午 / 主要）<select name="routeId">${routeOptions()}</select></label>
+      <label>員工<select name="reliefEmployeeId">${employeeOptions({ includeAll: true })}</select></label>
+      <label>代班路線（上午 / 主要）<select name="routeId"><option value="">無（維持固定路線）</option>${routeOptions()}</select></label>
       <label>併線<select name="isMergedLine"><option value="no">否</option><option value="yes">是</option></select></label>
       <label class="merged-route-label" style="display:none;">併線路線（下午）<select name="secondaryRouteId"><option value="">無（不併線）</option>${routeOptions()}</select></label>
       <label>ABC段<select name="abcSection"><option value="">無</option><option value="A">A</option><option value="B">B</option><option value="C">C</option></select></label>
@@ -2786,20 +2786,33 @@ function applyReliefOnly(formData, currentUser) {
     return false;
   }
 
-  const route = payload.routeId ? getRouteById(payload.routeId) : null;
-  if (!route) { window.alert("請選擇代班路線。"); return false; }
-  const isMergedLine = payload.isMergedLine === "yes";
-  const secondaryRoute = (isMergedLine && payload.secondaryRouteId) ? getRouteById(payload.secondaryRouteId) : null;
-  const reliefRouteId = route.id;
-  const secondaryRouteId = secondaryRoute ? secondaryRoute.id : "";
-  const isMerged = !!secondaryRouteId;
-  const shift = inferShift(route.name);
   const abcSection = (payload.abcSection || "").trim();
   const specialNote = (payload.specialNote || "").trim();
-  let note = (payload.note || "").trim() || "代班";
-  if (isMerged && !note.includes("併線")) {
-    note += "（併線）";
+
+  // 「無（維持固定路線）」模式：僅設定 ABC段，不換路線
+  const keepDefaultRoute = !payload.routeId;
+  if (keepDefaultRoute && !abcSection) {
+    window.alert("請選擇代班路線，或選擇 ABC 段。");
+    return false;
   }
+
+  const route = payload.routeId ? getRouteById(payload.routeId) : null;
+  if (!keepDefaultRoute && !route) { window.alert("請選擇代班路線。"); return false; }
+  const isMergedLine = keepDefaultRoute ? false : payload.isMergedLine === "yes";
+  const secondaryRoute = (isMergedLine && payload.secondaryRouteId) ? getRouteById(payload.secondaryRouteId) : null;
+  const secondaryRouteId = secondaryRoute ? secondaryRoute.id : "";
+  const isMerged = !!secondaryRouteId;
+
+  let note = (payload.note || "").trim();
+  if (keepDefaultRoute) {
+    note = note || `ABC段${abcSection}`;
+  } else {
+    note = note || "代班";
+    if (isMerged && !note.includes("併線")) {
+      note += "（併線）";
+    }
+  }
+
   const dates = enumerateDates(startDate, endDate);
   let processed = 0;
   let skippedHoliday = 0;
@@ -2811,33 +2824,64 @@ function applyReliefOnly(formData, currentUser) {
     }
 
     const reliefExisting = getAssignmentByEmployeeDate(reliefEmployee.id, dateString);
-    if (reliefExisting) {
-      reliefExisting.routeId = reliefRouteId;
-      reliefExisting.secondaryRouteId = secondaryRouteId;
-      reliefExisting.isMergedLine = isMergedLine;
-      reliefExisting.shift = shift;
-      reliefExisting.status = "reassigned";
-      reliefExisting.leaveType = "";
-      reliefExisting.note = note;
-      reliefExisting.specialNote = specialNote;
-      reliefExisting.abcSection = abcSection;
-      reliefExisting.source = "override";
+    if (keepDefaultRoute) {
+      // 僅更新 ABC段，不改路線
+      if (reliefExisting) {
+        reliefExisting.abcSection = abcSection;
+        reliefExisting.specialNote = specialNote || reliefExisting.specialNote;
+        if (note && note !== `ABC段${abcSection}`) reliefExisting.note = note;
+        reliefExisting.source = "override";
+      } else {
+        // 用員工預設路線建立 assignment
+        const defaultRoute = getDefaultRoute(reliefEmployee);
+        state.assignments.push({
+          id: makeId("asg"),
+          date: dateString,
+          employeeId: reliefEmployee.id,
+          routeId: defaultRoute ? defaultRoute.id : "",
+          secondaryRouteId: "",
+          isMergedLine: false,
+          shift: defaultRoute ? inferShift(defaultRoute.name) : "day",
+          status: "working",
+          leaveType: "",
+          note,
+          specialNote,
+          abcSection,
+          source: "override",
+        });
+      }
     } else {
-      state.assignments.push({
-        id: makeId("asg"),
-        date: dateString,
-        employeeId: reliefEmployee.id,
-        routeId: reliefRouteId,
-        secondaryRouteId,
-        isMergedLine,
-        shift,
-        status: "reassigned",
-        leaveType: "",
-        note,
-        specialNote,
-        abcSection,
-        source: "override",
-      });
+      // 原有代班邏輯
+      const reliefRouteId = route.id;
+      const shift = inferShift(route.name);
+      if (reliefExisting) {
+        reliefExisting.routeId = reliefRouteId;
+        reliefExisting.secondaryRouteId = secondaryRouteId;
+        reliefExisting.isMergedLine = isMergedLine;
+        reliefExisting.shift = shift;
+        reliefExisting.status = "reassigned";
+        reliefExisting.leaveType = "";
+        reliefExisting.note = note;
+        reliefExisting.specialNote = specialNote;
+        reliefExisting.abcSection = abcSection;
+        reliefExisting.source = "override";
+      } else {
+        state.assignments.push({
+          id: makeId("asg"),
+          date: dateString,
+          employeeId: reliefEmployee.id,
+          routeId: reliefRouteId,
+          secondaryRouteId,
+          isMergedLine,
+          shift,
+          status: "reassigned",
+          leaveType: "",
+          note,
+          specialNote,
+          abcSection,
+          source: "override",
+        });
+      }
     }
 
     processed += 1;
@@ -2848,18 +2892,30 @@ function applyReliefOnly(formData, currentUser) {
     return false;
   }
 
-  const mergedInfo = isMerged ? `（併線：上午 ${route.name} / 下午 ${secondaryRoute.name}）` : "";
-  logAction({
-    actorId: currentUser.id,
-    action: "relief",
-    targetType: "assignment",
-    targetId: reliefEmployee.id,
-    summary: `${reliefEmployee.name} 代班，${startDate} 至 ${endDate}${isMergedLine ? "（併線）" : ""}`,
-    detail: `路線 ${route.name}${mergedInfo}。套用 ${processed} 天${skippedHoliday ? `，略過假日 ${skippedHoliday} 天` : ""}。${specialNote ? `特殊記載：${specialNote}` : ""}`,
-  });
-
-  saveState();
-  window.alert(`代班已儲存。\n${reliefEmployee.name} 代班\n路線：${route.name}\n套用工作日 ${processed} 天${skippedHoliday ? `\n略過假日 ${skippedHoliday} 天` : ""}`);
+  if (keepDefaultRoute) {
+    logAction({
+      actorId: currentUser.id,
+      action: "abc-section",
+      targetType: "assignment",
+      targetId: reliefEmployee.id,
+      summary: `${reliefEmployee.name} 指派 ABC段${abcSection}，${startDate} 至 ${endDate}`,
+      detail: `維持固定路線，套用 ${processed} 天${skippedHoliday ? `，略過假日 ${skippedHoliday} 天` : ""}。${specialNote ? `特殊記載：${specialNote}` : ""}`,
+    });
+    saveState();
+    window.alert(`ABC段已儲存。\n${reliefEmployee.name} → ${abcSection}段\n套用工作日 ${processed} 天${skippedHoliday ? `\n略過假日 ${skippedHoliday} 天` : ""}`);
+  } else {
+    const mergedInfo = isMerged ? `（併線：上午 ${route.name} / 下午 ${secondaryRoute.name}）` : "";
+    logAction({
+      actorId: currentUser.id,
+      action: "relief",
+      targetType: "assignment",
+      targetId: reliefEmployee.id,
+      summary: `${reliefEmployee.name} 代班，${startDate} 至 ${endDate}${isMergedLine ? "（併線）" : ""}`,
+      detail: `路線 ${route.name}${mergedInfo}。套用 ${processed} 天${skippedHoliday ? `，略過假日 ${skippedHoliday} 天` : ""}。${specialNote ? `特殊記載：${specialNote}` : ""}`,
+    });
+    saveState();
+    window.alert(`代班已儲存。\n${reliefEmployee.name} 代班\n路線：${route.name}\n套用工作日 ${processed} 天${skippedHoliday ? `\n略過假日 ${skippedHoliday} 天` : ""}`);
+  }
   return true;
 }
 
