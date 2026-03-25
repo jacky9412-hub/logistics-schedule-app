@@ -750,7 +750,12 @@ function getAssignmentsForEmployee(employeeId) {
 }
 
 function getAssignmentByEmployeeDate(employeeId, dateString) {
-  return state.assignments.find((assignment) => assignment.employeeId === employeeId && assignment.date === dateString);
+  const all = state.assignments.filter((a) => a.employeeId === employeeId && a.date === dateString);
+  return all.find((a) => !a.dayPart || a.dayPart === "full") || all[0] || undefined;
+}
+
+function getAssignmentsByEmployeeDate(employeeId, dateString) {
+  return state.assignments.filter((a) => a.employeeId === employeeId && a.date === dateString);
 }
 
 function getAssignmentsByDate(dateString) {
@@ -913,8 +918,10 @@ function buildMonthlyExportData(startDate, endDate) {
     const leaveNames = leaveEntries.map((a) => {
       const emp = getEmployeeById(a.employeeId);
       if (!emp) return null;
+      const shortName = emp.name.replace(/^(.).*?(.)$/, "$1$2");
+      const dpSuffix = a.dayPart === "am" ? "(上)" : a.dayPart === "pm" ? "(下)" : "";
       return {
-        name: emp.name.replace(/^(.).*?(.)$/, "$1$2"),
+        name: shortName + dpSuffix,
         color: a.leaveType === "annual" ? "green" : "yellow",
       };
     }).filter(Boolean);
@@ -928,10 +935,8 @@ function buildMonthlyExportData(startDate, endDate) {
     const hasMergedLine = allDateAssignments.some((a) => a.isMergedLine);
     const mergedLineRoutes = hasMergedLine ? ["★"] : [];
 
-    // Helper: get what an employee is doing on this date
-    const getEmployeeAction = (emp) => {
-      if (!emp) return { text: "", color: null };
-      const assignment = getAssignmentByEmployeeDate(emp.id, dateStr);
+    // Helper: describe a single assignment for display
+    const describeOneAction = (emp, assignment) => {
       if (!assignment) return { text: "", color: null };
       if (assignment.status === "leave") {
         const colorType = assignment.leaveType === "annual" ? "green" : "yellow";
@@ -950,7 +955,6 @@ function buildMonthlyExportData(startDate, endDate) {
             if (assignment.abcSection) text += assignment.abcSection;
             return { text, color: "yellow" };
           }
-          // On default route but has abcSection
           if (assignment.abcSection) {
             return { text: assignment.abcSection, color: null };
           }
@@ -960,6 +964,42 @@ function buildMonthlyExportData(startDate, endDate) {
         return { text: assignment.abcSection, color: null };
       }
       return { text: "", color: null };
+    };
+
+    // Helper: get what an employee is doing on this date
+    const getEmployeeAction = (emp) => {
+      if (!emp) return { text: "", color: null };
+      const assignments = getAssignmentsByEmployeeDate(emp.id, dateStr);
+      if (!assignments.length) return { text: "", color: null };
+
+      // 如果有兩筆半日 assignment，組合顯示
+      if (assignments.length >= 2) {
+        const amAsg = assignments.find((a) => a.dayPart === "am");
+        const pmAsg = assignments.find((a) => a.dayPart === "pm");
+        if (amAsg && pmAsg) {
+          const amAction = describeOneAction(emp, amAsg);
+          const pmAction = describeOneAction(emp, pmAsg);
+          const amText = amAction.text || "";
+          const pmText = pmAction.text || "";
+          // 兩邊都是 X（都請假）→ 顯示全天 X
+          if (amText === "X" && pmText === "X") {
+            return { text: "X", color: amAction.color || pmAction.color };
+          }
+          const text = `(上)${amText || "-"}\n(下)${pmText || "-"}`;
+          const color = amAction.color || pmAction.color || "yellow";
+          return { text, color };
+        }
+      }
+
+      // 單筆（full 或僅單一半日）
+      const assignment = assignments.find((a) => !a.dayPart || a.dayPart === "full") || assignments[0];
+      const action = describeOneAction(emp, assignment);
+      // 若為半日且有內容，加上時段標記
+      if (assignment.dayPart && assignment.dayPart !== "full" && action.text) {
+        const prefix = assignment.dayPart === "am" ? "(上)" : "(下)";
+        return { text: `${prefix}${action.text}`, color: action.color };
+      }
+      return action;
     };
 
     // Team leader columns
@@ -1124,7 +1164,8 @@ function describeAssignment(assignment) {
   const secondaryRoute = assignment.secondaryRouteId ? getRouteById(assignment.secondaryRouteId) : null;
   const routeText = route ? route.name : "未指定路線";
   const mergedText = secondaryRoute ? ` + 併線：${secondaryRoute.name}` : "";
-  return `${getLabel("shifts", assignment.shift)} / ${routeText}${mergedText} / ${getLabel("statuses", assignment.status)}`;
+  const dayPartText = assignment.dayPart === "am" ? " / 上午" : assignment.dayPart === "pm" ? " / 下午" : "";
+  return `${getLabel("shifts", assignment.shift)} / ${routeText}${mergedText} / ${getLabel("statuses", assignment.status)}${dayPartText}`;
 }
 
 function buildRoleHint(role) {
@@ -1279,7 +1320,7 @@ function renderStats(currentUser) {
   const todayAssignments = getAssignmentsByDate(getToday());
   const fixedEmployees = state.employees.filter((employee) => employee.defaultRouteId).length;
   const overrides = todayAssignments.filter((assignment) => assignment.source === "override").length;
-  const leaves = todayAssignments.filter((assignment) => assignment.status === "leave").length;
+  const leaves = todayAssignments.filter((a) => a.status === "leave").reduce((sum, a) => sum + (a.dayPart === "am" || a.dayPart === "pm" ? 0.5 : 1), 0);
   stats.appendChild(buildStatCard("今日班表", `${todayAssignments.length} 筆`, "固定配置 + 異動覆蓋"));
   stats.appendChild(buildStatCard("固定配置人員", `${fixedEmployees} 人`, "平常有固定路線的人員"));
   stats.appendChild(buildStatCard("今日請假", `${leaves} 筆`, "含連續請假與代班安排"));
@@ -1491,6 +1532,7 @@ function renderSchedulingWorkbenchV2(currentUser) {
       <label>開始日期<input name="startDate" type="date" value="${getToday()}"></label>
       <label>結束日期<input name="endDate" type="date" value="${getToday()}"></label>
       <label>請假員工<select name="employeeId">${employeeOptions({ includeAll: true })}</select></label>
+      <label>時段<select name="dayPart"><option value="full">全天</option><option value="am">上午</option><option value="pm">下午</option></select></label>
       <label>假別<select name="leaveType">${labelOptions("leaveTypes")}</select></label>
       <label>備註<textarea name="note" placeholder="例如：連續特休、家庭因素"></textarea></label>
       <button type="submit">儲存請假</button>
@@ -1510,6 +1552,7 @@ function renderSchedulingWorkbenchV2(currentUser) {
       <label>代班開始日期<input name="startDate" type="date" value="${getToday()}"></label>
       <label>代班結束日期<input name="endDate" type="date" value="${getToday()}"></label>
       <label>員工<select name="reliefEmployeeId">${employeeOptions({ includeAll: true })}</select></label>
+      <label>時段<select name="dayPart"><option value="full">全天</option><option value="am">上午</option><option value="pm">下午</option></select></label>
       <label>代班路線（上午 / 主要）<select name="routeId"><option value="">無（維持固定路線）</option>${routeOptions()}</select></label>
       <label>併線<select name="isMergedLine"><option value="no">否</option><option value="yes">是</option></select></label>
       <label class="merged-route-label" style="display:none;">併線路線（下午）<select name="secondaryRouteId"><option value="">無（不併線）</option>${routeOptions()}</select></label>
@@ -1635,6 +1678,7 @@ function renderSchedulingWorkbenchV2(currentUser) {
             <label>狀態<select name="status">${Object.entries(state.labelSettings.statuses).map(([k, v]) => `<option value="${k}" ${asg.status === k ? "selected" : ""}>${v}</option>`).join("")}</select></label>
             <label>假別<select name="leaveType">${Object.entries(state.labelSettings.leaveTypes).map(([k, v]) => `<option value="${k}" ${asg.leaveType === k ? "selected" : ""}>${v}</option>`).join("")}<option value="" ${!asg.leaveType ? "selected" : ""}>無</option></select></label>
             <label>班別<select name="shift">${Object.entries(state.labelSettings.shifts).map(([k, v]) => `<option value="${k}" ${asg.shift === k ? "selected" : ""}>${v}</option>`).join("")}</select></label>
+            <label>時段<select name="dayPart"><option value="full" ${(!asg.dayPart || asg.dayPart === "full") ? "selected" : ""}>全天</option><option value="am" ${asg.dayPart === "am" ? "selected" : ""}>上午</option><option value="pm" ${asg.dayPart === "pm" ? "selected" : ""}>下午</option></select></label>
             <label>路線（上午 / 主要）<select name="routeId">${sortedRoutes().map((r) => `<option value="${r.id}" ${asg.routeId === r.id ? "selected" : ""}>${r.name}</option>`).join("")}</select></label>
             <label>併線<select name="isMergedLine"><option value="no" ${!asg.isMergedLine ? "selected" : ""}>否</option><option value="yes" ${asg.isMergedLine ? "selected" : ""}>是</option></select></label>
             <label>併線路線（下午）<select name="secondaryRouteId"><option value="" ${!asg.secondaryRouteId ? "selected" : ""}>無（不併線）</option>${sortedRoutes().map((r) => `<option value="${r.id}" ${asg.secondaryRouteId === r.id ? "selected" : ""}>${r.name}</option>`).join("")}</select></label>
@@ -1657,6 +1701,7 @@ function renderSchedulingWorkbenchV2(currentUser) {
           target.status = fd.get("status");
           target.leaveType = fd.get("status") === "leave" ? fd.get("leaveType") : "";
           target.shift = fd.get("shift");
+          target.dayPart = fd.get("dayPart") || "full";
           target.routeId = fd.get("routeId");
           target.isMergedLine = fd.get("isMergedLine") === "yes";
           target.secondaryRouteId = target.isMergedLine ? (fd.get("secondaryRouteId") || "") : "";
@@ -1868,7 +1913,7 @@ function openDailyBoardWindow() {
       <div class="meta">
         <span>總筆數 ${getAssignmentsByDate(getToday()).length}</span>
         <span>異動覆蓋 ${getAssignmentsByDate(getToday()).filter((assignment) => assignment.source === "override").length}</span>
-        <span>請假 ${getAssignmentsByDate(getToday()).filter((assignment) => assignment.status === "leave").length}</span>
+        <span>請假 ${getAssignmentsByDate(getToday()).filter((a) => a.status === "leave").reduce((sum, a) => sum + (a.dayPart === "am" || a.dayPart === "pm" ? 0.5 : 1), 0)}</span>
       </div>
       <table>
         <thead>
@@ -2069,11 +2114,13 @@ function openLeaveSummaryWindow(startDate, endDate) {
   for (const [date, assignments] of dateGroups) {
     assignments.forEach((a, idx) => {
       const emp = getEmployeeById(a.employeeId);
+      const dpLabel = a.dayPart === "am" ? "上午" : a.dayPart === "pm" ? "下午" : "全天";
       detailRows += `
         <tr${idx === 0 ? ' class="date-first"' : ""}>
           ${idx === 0 ? `<td rowspan="${assignments.length}" class="date-cell">${formatDate(date)}</td>` : ""}
           <td>${emp ? emp.name : a.employeeId}</td>
           <td><strong>${getLabel("leaveTypes", a.leaveType)}</strong></td>
+          <td>${dpLabel}</td>
           <td>${a.note || "-"}</td>
         </tr>
       `;
@@ -2081,7 +2128,7 @@ function openLeaveSummaryWindow(startDate, endDate) {
   }
 
   if (!leaveAssignments.length) {
-    detailRows = `<tr><td colspan="4" style="text-align:center;padding:24px;color:#6f6254;">此區間沒有休假記錄。</td></tr>`;
+    detailRows = `<tr><td colspan="5" style="text-align:center;padding:24px;color:#6f6254;">此區間沒有休假記錄。</td></tr>`;
   }
 
   popup.document.open();
@@ -2126,6 +2173,7 @@ function openLeaveSummaryWindow(startDate, endDate) {
             <th>日期</th>
             <th>員工</th>
             <th>假別</th>
+            <th>時段</th>
             <th>備註</th>
           </tr>
         </thead>
@@ -2513,6 +2561,31 @@ function openRangeBoardWindow(startDate, endDate) {
     const defaultRoute = getDefaultRoute(employee);
     let hasOverride = false;
     const cells = visibleDates.map((dateString) => {
+      const allAsg = getAssignmentsByEmployeeDate(employee.id, dateString);
+      const amAsg = allAsg.find((a) => a.dayPart === "am");
+      const pmAsg = allAsg.find((a) => a.dayPart === "pm");
+
+      // 半日組合顯示
+      if (amAsg && pmAsg) {
+        if (amAsg.source === "override" || pmAsg.source === "override") hasOverride = true;
+        const descHalf = (a) => {
+          if (a.status === "leave") return a.leaveType ? getLabel("leaveTypes", a.leaveType) : "休假";
+          const r = getRouteById(a.routeId);
+          return r ? r.name : "-";
+        };
+        const routeText = `(上)${descHalf(amAsg)}\n(下)${descHalf(pmAsg)}`;
+        const metaParts = [];
+        if (amAsg.status === "leave" || pmAsg.status === "leave") metaParts.push("半日休假");
+        if (amAsg.source === "override" || pmAsg.source === "override") metaParts.push("異動");
+        return `
+          <td class="override-cell" style="white-space:pre-line;">
+            <div class="month-route">${routeText}</div>
+            <div class="month-meta">${metaParts.join(" / ") || "-"}</div>
+          </td>
+        `;
+      }
+
+      // 單筆（含 full 或單一半日）
       const assignment = getDisplayAssignment(employee, dateString);
       const route = assignment ? getRouteById(assignment.routeId) : null;
       const secondaryRoute = assignment?.secondaryRouteId ? getRouteById(assignment.secondaryRouteId) : null;
@@ -2523,7 +2596,8 @@ function openRangeBoardWindow(startDate, endDate) {
       const cellClass = [assignment?.source === "override" ? "override-cell" : "", secondaryRoute ? "merged-cell" : ""].filter(Boolean).join(" ");
       let routeText;
       if (assignment?.status === "leave") {
-        routeText = leaveType || "\u4f11\u5047";
+        const dpPrefix = assignment.dayPart === "am" ? "(上)" : assignment.dayPart === "pm" ? "(下)" : "";
+        routeText = dpPrefix + (leaveType || "\u4f11\u5047");
       } else if (secondaryRoute) {
         routeText = `${route?.name || "-"}+${secondaryRoute.name}`;
       } else {
@@ -2799,6 +2873,7 @@ function applyLeaveOnly(formData, currentUser) {
   const leaveRouteId = defaultRoute ? defaultRoute.id : "";
   const shift = defaultRoute ? employee.shift : "day";
   const note = (payload.note || "").trim();
+  const dayPart = payload.dayPart || "full";
   const dates = enumerateDates(startDate, endDate);
   let processed = 0;
   let skippedHoliday = 0;
@@ -2809,9 +2884,15 @@ function applyLeaveOnly(formData, currentUser) {
       return;
     }
 
-    let leaveAssignment = getAssignmentByEmployeeDate(employee.id, dateString);
-    if (!leaveAssignment) {
-      leaveAssignment = {
+    if (dayPart === "full") {
+      // 全天請假：原有邏輯
+      // 先移除所有該員工該日的半日 assignment（如有）
+      const existingAll = getAssignmentsByEmployeeDate(employee.id, dateString);
+      existingAll.forEach((a) => {
+        const idx = state.assignments.indexOf(a);
+        if (idx !== -1) state.assignments.splice(idx, 1);
+      });
+      state.assignments.push({
         id: makeId("asg"),
         date: dateString,
         employeeId: employee.id,
@@ -2821,15 +2902,51 @@ function applyLeaveOnly(formData, currentUser) {
         leaveType: payload.leaveType,
         note,
         source: "override",
-      };
-      state.assignments.push(leaveAssignment);
+        dayPart: "full",
+      });
     } else {
-      leaveAssignment.routeId = leaveRouteId;
-      leaveAssignment.shift = shift;
-      leaveAssignment.status = "leave";
-      leaveAssignment.leaveType = payload.leaveType;
-      leaveAssignment.note = note;
-      leaveAssignment.source = "override";
+      // 半日請假（am 或 pm）
+      const otherPart = dayPart === "am" ? "pm" : "am";
+      const existingAll = getAssignmentsByEmployeeDate(employee.id, dateString);
+      const existingFull = existingAll.find((a) => !a.dayPart || a.dayPart === "full");
+      const existingSame = existingAll.find((a) => a.dayPart === dayPart);
+
+      if (existingFull) {
+        // 拆分全天 assignment：原記錄改為另一半天，新建本半天 leave
+        existingFull.dayPart = otherPart;
+        state.assignments.push({
+          id: makeId("asg"),
+          date: dateString,
+          employeeId: employee.id,
+          routeId: leaveRouteId,
+          shift,
+          status: "leave",
+          leaveType: payload.leaveType,
+          note,
+          source: "override",
+          dayPart,
+        });
+      } else if (existingSame) {
+        // 覆寫同時段
+        existingSame.status = "leave";
+        existingSame.leaveType = payload.leaveType;
+        existingSame.note = note;
+        existingSame.source = "override";
+      } else {
+        // 無任何 assignment，直接新建半日 leave
+        state.assignments.push({
+          id: makeId("asg"),
+          date: dateString,
+          employeeId: employee.id,
+          routeId: leaveRouteId,
+          shift,
+          status: "leave",
+          leaveType: payload.leaveType,
+          note,
+          source: "override",
+          dayPart,
+        });
+      }
     }
 
     processed += 1;
@@ -2840,17 +2957,18 @@ function applyLeaveOnly(formData, currentUser) {
     return false;
   }
 
+  const dayPartLabel = dayPart === "am" ? "（上午）" : dayPart === "pm" ? "（下午）" : "";
   logAction({
     actorId: currentUser.id,
     action: "leave",
     targetType: "assignment",
     targetId: employee.id,
-    summary: `${employee.name} ${startDate} 至 ${endDate} 登記 ${getLabel("leaveTypes", payload.leaveType)}`,
+    summary: `${employee.name} ${startDate} 至 ${endDate} 登記 ${getLabel("leaveTypes", payload.leaveType)}${dayPartLabel}`,
     detail: `套用 ${processed} 天${skippedHoliday ? `，略過假日 ${skippedHoliday} 天` : ""}。`,
   });
 
   saveState();
-  window.alert(`請假已儲存。\n套用工作日 ${processed} 天${skippedHoliday ? `\n略過假日 ${skippedHoliday} 天` : ""}`);
+  window.alert(`請假已儲存。${dayPartLabel}\n套用工作日 ${processed} 天${skippedHoliday ? `\n略過假日 ${skippedHoliday} 天` : ""}`);
   return true;
 }
 
@@ -2897,58 +3015,60 @@ function applyReliefOnly(formData, currentUser) {
     }
   }
 
+  const dayPart = payload.dayPart || "full";
+  // 併線與半日不可併用
+  if (isMergedLine && dayPart !== "full") {
+    window.alert("併線模式不支援半日代班，請選擇全天。");
+    return false;
+  }
+
   const dates = enumerateDates(startDate, endDate);
   let processed = 0;
   let skippedHoliday = 0;
 
-  dates.forEach((dateString) => {
-    if (isHoliday(dateString)) {
-      skippedHoliday += 1;
-      return;
-    }
-
-    const reliefExisting = getAssignmentByEmployeeDate(reliefEmployee.id, dateString);
+  // 用來更新或建立半日代班 assignment 的輔助函式
+  function applyReliefToAssignment(existing, dateString, dp) {
     if (keepDefaultRoute) {
-      // 僅更新 ABC段，不改路線
-      if (reliefExisting) {
-        reliefExisting.abcSection = abcSection;
-        reliefExisting.specialNote = specialNote || reliefExisting.specialNote;
-        if (note && note !== `ABC段${abcSection}`) reliefExisting.note = note;
-        reliefExisting.source = "override";
+      if (existing) {
+        existing.abcSection = abcSection;
+        existing.specialNote = specialNote || existing.specialNote;
+        if (note && note !== `ABC段${abcSection}`) existing.note = note;
+        existing.source = "override";
+        if (dp !== "full") existing.dayPart = dp;
       } else {
-        // 用員工預設路線建立 assignment
-        const defaultRoute = getDefaultRoute(reliefEmployee);
+        const defRoute = getDefaultRoute(reliefEmployee);
         state.assignments.push({
           id: makeId("asg"),
           date: dateString,
           employeeId: reliefEmployee.id,
-          routeId: defaultRoute ? defaultRoute.id : "",
+          routeId: defRoute ? defRoute.id : "",
           secondaryRouteId: "",
           isMergedLine: false,
-          shift: defaultRoute ? inferShift(defaultRoute.name) : "day",
+          shift: defRoute ? inferShift(defRoute.name) : "day",
           status: "working",
           leaveType: "",
           note,
           specialNote,
           abcSection,
           source: "override",
+          dayPart: dp,
         });
       }
     } else {
-      // 原有代班邏輯
       const reliefRouteId = route.id;
       const shift = inferShift(route.name);
-      if (reliefExisting) {
-        reliefExisting.routeId = reliefRouteId;
-        reliefExisting.secondaryRouteId = secondaryRouteId;
-        reliefExisting.isMergedLine = isMergedLine;
-        reliefExisting.shift = shift;
-        reliefExisting.status = "reassigned";
-        reliefExisting.leaveType = "";
-        reliefExisting.note = note;
-        reliefExisting.specialNote = specialNote;
-        reliefExisting.abcSection = abcSection;
-        reliefExisting.source = "override";
+      if (existing) {
+        existing.routeId = reliefRouteId;
+        existing.secondaryRouteId = secondaryRouteId;
+        existing.isMergedLine = isMergedLine;
+        existing.shift = shift;
+        existing.status = "reassigned";
+        existing.leaveType = "";
+        existing.note = note;
+        existing.specialNote = specialNote;
+        existing.abcSection = abcSection;
+        existing.source = "override";
+        if (dp !== "full") existing.dayPart = dp;
       } else {
         state.assignments.push({
           id: makeId("asg"),
@@ -2964,7 +3084,43 @@ function applyReliefOnly(formData, currentUser) {
           specialNote,
           abcSection,
           source: "override",
+          dayPart: dp,
         });
+      }
+    }
+  }
+
+  dates.forEach((dateString) => {
+    if (isHoliday(dateString)) {
+      skippedHoliday += 1;
+      return;
+    }
+
+    if (dayPart === "full") {
+      // 全天代班：移除既有半日記錄，建立全天
+      const existingAll = getAssignmentsByEmployeeDate(reliefEmployee.id, dateString);
+      existingAll.forEach((a) => {
+        const idx = state.assignments.indexOf(a);
+        if (idx !== -1) state.assignments.splice(idx, 1);
+      });
+      applyReliefToAssignment(null, dateString, "full");
+    } else {
+      // 半日代班
+      const otherPart = dayPart === "am" ? "pm" : "am";
+      const existingAll = getAssignmentsByEmployeeDate(reliefEmployee.id, dateString);
+      const existingFull = existingAll.find((a) => !a.dayPart || a.dayPart === "full");
+      const existingSame = existingAll.find((a) => a.dayPart === dayPart);
+
+      if (existingFull) {
+        // 拆分全天：原記錄改為另一半，新建本半代班
+        existingFull.dayPart = otherPart;
+        applyReliefToAssignment(null, dateString, dayPart);
+      } else if (existingSame) {
+        // 覆寫同時段
+        applyReliefToAssignment(existingSame, dateString, dayPart);
+      } else {
+        // 無任何 assignment，直接新建半日
+        applyReliefToAssignment(null, dateString, dayPart);
       }
     }
 
@@ -2976,17 +3132,18 @@ function applyReliefOnly(formData, currentUser) {
     return false;
   }
 
+  const dayPartLabel = dayPart === "am" ? "（上午）" : dayPart === "pm" ? "（下午）" : "";
   if (keepDefaultRoute) {
     logAction({
       actorId: currentUser.id,
       action: "abc-section",
       targetType: "assignment",
       targetId: reliefEmployee.id,
-      summary: `${reliefEmployee.name} 指派 ABC段${abcSection}，${startDate} 至 ${endDate}`,
+      summary: `${reliefEmployee.name} 指派 ABC段${abcSection}，${startDate} 至 ${endDate}${dayPartLabel}`,
       detail: `維持固定路線，套用 ${processed} 天${skippedHoliday ? `，略過假日 ${skippedHoliday} 天` : ""}。${specialNote ? `特殊記載：${specialNote}` : ""}`,
     });
     saveState();
-    window.alert(`ABC段已儲存。\n${reliefEmployee.name} → ${abcSection}段\n套用工作日 ${processed} 天${skippedHoliday ? `\n略過假日 ${skippedHoliday} 天` : ""}`);
+    window.alert(`ABC段已儲存。${dayPartLabel}\n${reliefEmployee.name} → ${abcSection}段\n套用工作日 ${processed} 天${skippedHoliday ? `\n略過假日 ${skippedHoliday} 天` : ""}`);
   } else {
     const mergedInfo = isMerged ? `（併線：上午 ${route.name} / 下午 ${secondaryRoute.name}）` : "";
     logAction({
@@ -2994,11 +3151,11 @@ function applyReliefOnly(formData, currentUser) {
       action: "relief",
       targetType: "assignment",
       targetId: reliefEmployee.id,
-      summary: `${reliefEmployee.name} 代班，${startDate} 至 ${endDate}${isMergedLine ? "（併線）" : ""}`,
+      summary: `${reliefEmployee.name} 代班，${startDate} 至 ${endDate}${dayPartLabel}${isMergedLine ? "（併線）" : ""}`,
       detail: `路線 ${route.name}${mergedInfo}。套用 ${processed} 天${skippedHoliday ? `，略過假日 ${skippedHoliday} 天` : ""}。${specialNote ? `特殊記載：${specialNote}` : ""}`,
     });
     saveState();
-    window.alert(`代班已儲存。\n${reliefEmployee.name} 代班\n路線：${route.name}\n套用工作日 ${processed} 天${skippedHoliday ? `\n略過假日 ${skippedHoliday} 天` : ""}`);
+    window.alert(`代班已儲存。${dayPartLabel}\n${reliefEmployee.name} 代班\n路線：${route.name}\n套用工作日 ${processed} 天${skippedHoliday ? `\n略過假日 ${skippedHoliday} 天` : ""}`);
   }
   return true;
 }
