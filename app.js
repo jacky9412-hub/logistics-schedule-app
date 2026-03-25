@@ -1557,7 +1557,6 @@ function renderSchedulingWorkbenchV2(currentUser) {
       <label>併線<select name="isMergedLine"><option value="no">否</option><option value="yes">是</option></select></label>
       <label class="merged-route-label" style="display:none;">併線路線（下午）<select name="secondaryRouteId"><option value="">無（不併線）</option>${routeOptions()}</select></label>
       <label>ABC段<select name="abcSection"><option value="">無</option><option value="A">A</option><option value="B">B</option><option value="C">C</option></select></label>
-      <label>特殊記載<textarea name="specialNote" placeholder="例如：預交提出、月底提出"></textarea></label>
       <label>備註<textarea name="note" placeholder="例如：支援大夜班、臨時調度"></textarea></label>
       <button type="submit">儲存代班</button>
     </form>
