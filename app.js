@@ -946,7 +946,7 @@ function buildMonthlyExportData(startDate, endDate) {
         const route = getRouteById(assignment.routeId);
         if (route) {
           const defaultRoute = getDefaultRoute(emp);
-          if (!defaultRoute || route.id !== defaultRoute.id) {
+          if (!defaultRoute || route.id !== defaultRoute.id || assignment.secondaryRouteId) {
             let text = route.name;
             if (assignment.secondaryRouteId) {
               const secRoute = getRouteById(assignment.secondaryRouteId);
@@ -1029,8 +1029,12 @@ function buildMonthlyExportData(startDate, endDate) {
       if (assignment.source === "override" || assignment.status === "reassigned") {
         const route = getRouteById(assignment.routeId);
         const defaultRoute = getDefaultRoute(info.owner);
-        if (route && defaultRoute && route.id !== defaultRoute.id) {
+        if (route && defaultRoute && (route.id !== defaultRoute.id || assignment.secondaryRouteId)) {
           let text = route.name;
+          if (assignment.secondaryRouteId) {
+            const secRoute = getRouteById(assignment.secondaryRouteId);
+            if (secRoute) text = `(上)${route.name}\n(下)${secRoute.name}`;
+          }
           if (assignment.abcSection) text += assignment.abcSection;
           return { text, color: "yellow" };
         }
