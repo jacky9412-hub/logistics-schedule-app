@@ -1296,6 +1296,15 @@ function renderDailyBoardLauncher() {
   section.querySelector("#openDailyBoardTopButton").addEventListener("click", () => {
     openDailyBoardWindow();
   });
+  const monitorLauncherButton = document.createElement("button");
+  monitorLauncherButton.type = "button";
+  monitorLauncherButton.className = "secondary";
+  monitorLauncherButton.id = "openScheduleMonitorButton";
+  monitorLauncherButton.textContent = "開啟同步監看";
+  section.querySelector(".action-row").insertBefore(
+    monitorLauncherButton,
+    section.querySelector("#exportMonthlyPrintBtn"),
+  );
   return section;
 }
 
@@ -1342,6 +1351,12 @@ function renderManagementLaunchers() {
     const e = form.elements.endDate.value;
     if (!s || !e || s > e) { window.alert("請確認日期區間正確。"); return; }
     openLeaveSummaryWindow(s, e);
+  });
+  section.querySelector("#openScheduleMonitorButton").addEventListener("click", () => {
+    const form = section.querySelector("#rangeBoardForm");
+    const s = form.elements.startDate.value;
+    if (!s) { window.alert("請先選擇監看月份日期。"); return; }
+    openScheduleMonitorWindow(s);
   });
   const exportNoteInput = section.querySelector("#exportNoteInput");
   exportNoteInput.addEventListener("input", () => {
