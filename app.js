@@ -1946,6 +1946,7 @@ function renderScheduleMonitorWindow() {
   }
 
   const previewDate = getScheduleMonitorDate();
+  const previewMonth = previewDate.slice(0, 7);
   const monitorData = buildScheduleMonitorRows(previewDate);
   const colorClassMap = {
     yellow: "yellow-cell",
@@ -2028,7 +2029,7 @@ function renderScheduleMonitorWindow() {
   <div class="topbar">
     <h1>同步排班監看</h1>
     <div class="controls">
-      <label>監看日期 <input id="monitorDateInput" type="date" value="${previewDate}"></label>
+      <label>監看月份 <input id="monitorMonthInput" type="month" value="${previewMonth}"></label>
     </div>
   </div>
   <p class="date-label">${monitorData.title}</p>
@@ -2046,9 +2047,11 @@ function renderScheduleMonitorWindow() {
     </table>
   </div>
   <script>
-    document.getElementById('monitorDateInput').addEventListener('change', function (event) {
+    document.getElementById('monitorMonthInput').addEventListener('change', function (event) {
+      var monthValue = event.target.value;
+      if (!monthValue) return;
       if (window.opener && !window.opener.closed && typeof window.opener.updateScheduleMonitorDate === 'function') {
-        window.opener.updateScheduleMonitorDate(event.target.value);
+        window.opener.updateScheduleMonitorDate(monthValue + '-01');
       }
     });
   </script>
