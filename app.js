@@ -934,6 +934,18 @@ function buildMonthlyExportData(startDate, endDate) {
     const specialNotes = [...new Set([...dateNotes, ...assignmentNotes])];
     const hasMergedLine = allDateAssignments.some((a) => a.isMergedLine);
     const mergedLineRoutes = hasMergedLine ? ["★"] : [];
+    const compactMergedRouteNames = new Set(["市政段", "黎明段"]);
+    const isCompactMergedRoute = (routeName) => compactMergedRouteNames.has(routeName);
+    const formatMergedAssignmentText = ({ route, secRoute, defaultRoute }) => {
+      if (!route) return "";
+      const isOwnRoute = defaultRoute && route.id === defaultRoute.id;
+      if (isOwnRoute) {
+        return isCompactMergedRoute(route.name)
+          ? "併"
+          : (secRoute ? `(上)${route.name}\n(下)${secRoute.name}` : route.name);
+      }
+      return `${route.name}+併`;
+    };
 
     // Helper: describe a single assignment for display
     const describeOneAction = (emp, assignment) => {
@@ -942,21 +954,26 @@ function buildMonthlyExportData(startDate, endDate) {
         const colorType = assignment.leaveType === "annual" ? "green" : "yellow";
         return { text: "X", color: colorType };
       }
-      if (assignment.status === "reassigned" || assignment.source === "override") {
-        const route = getRouteById(assignment.routeId);
-        if (route) {
-          const defaultRoute = getDefaultRoute(emp);
-          if (!defaultRoute || route.id !== defaultRoute.id || assignment.secondaryRouteId) {
-            let text = route.name;
-            if (assignment.secondaryRouteId) {
-              const secRoute = getRouteById(assignment.secondaryRouteId);
-              if (secRoute) text = `(上)${route.name}\n(下)${secRoute.name}`;
+        if (assignment.status === "reassigned" || assignment.source === "override") {
+          const route = getRouteById(assignment.routeId);
+          if (route) {
+            const defaultRoute = getDefaultRoute(emp);
+            if (!defaultRoute || route.id !== defaultRoute.id || assignment.secondaryRouteId) {
+              let text = route.name;
+              if (isCompactMergedRoute(route.name) && hasMergedLine) {
+                const secRoute = assignment.secondaryRouteId ? getRouteById(assignment.secondaryRouteId) : null;
+                text = formatMergedAssignmentText({ route, secRoute, defaultRoute });
+              } else if (assignment.secondaryRouteId) {
+                const secRoute = getRouteById(assignment.secondaryRouteId);
+                if (secRoute) {
+                  text = formatMergedAssignmentText({ route, secRoute, defaultRoute });
+                }
+              }
+              if (assignment.abcSection) text += assignment.abcSection;
+              return { text, color: "yellow" };
             }
-            if (assignment.abcSection) text += assignment.abcSection;
-            return { text, color: "yellow" };
-          }
-          if (assignment.abcSection) {
-            return { text: assignment.abcSection, color: null };
+            if (assignment.abcSection) {
+              return { text: assignment.abcSection, color: null };
           }
         }
       }
@@ -1016,52 +1033,76 @@ function buildMonthlyExportData(startDate, endDate) {
 
     // Urban route columns
     const urbanCells = urbanRouteInfos.map((info) => {
-      if (!info.owner) return { text: "", color: null };
-      const assignment = getAssignmentByEmployeeDate(info.owner.id, dateStr);
-      if (!assignment) return { text: "", color: null };
+      const computeCell = () => {
+        if (!info.owner) return { text: "", color: null, mergeEligible: false };
+        const assignment = getAssignmentByEmployeeDate(info.owner.id, dateStr);
+        if (!assignment) {
+          return { text: "", color: null, mergeEligible: isCompactMergedRoute(info.routeName) };
+        }
 
-      if (assignment.status === "leave") {
-        const colorType = assignment.leaveType === "annual" ? "green" : "yellow";
-        return { text: "X", color: colorType };
-      }
+        if (assignment.status === "leave") {
+          const colorType = assignment.leaveType === "annual" ? "green" : "yellow";
+          return { text: "X", color: colorType, mergeEligible: false };
+        }
 
-      // Check if owner is doing something else (reassigned away)
-      if (assignment.source === "override" || assignment.status === "reassigned") {
-        const route = getRouteById(assignment.routeId);
-        const defaultRoute = getDefaultRoute(info.owner);
-        if (route && defaultRoute && (route.id !== defaultRoute.id || assignment.secondaryRouteId)) {
-          let text = route.name;
-          if (assignment.secondaryRouteId) {
-            const secRoute = getRouteById(assignment.secondaryRouteId);
-            if (secRoute) text = `(上)${route.name}\n(下)${secRoute.name}`;
+        // Check if owner is doing something else (reassigned away)
+        if (assignment.source === "override" || assignment.status === "reassigned") {
+          const route = getRouteById(assignment.routeId);
+          const defaultRoute = getDefaultRoute(info.owner);
+          if (route && defaultRoute && route.id !== defaultRoute.id) {
+            let text = route.name;
+            if (assignment.abcSection) text += assignment.abcSection;
+            return { text, color: "yellow", mergeEligible: false };
           }
-          if (assignment.abcSection) text += assignment.abcSection;
-          return { text, color: "yellow" };
+          if (route && defaultRoute && route.id === defaultRoute.id && hasMergedLine && isCompactMergedRoute(route.name)) {
+            if (assignment.abcSection) {
+              return { text: `${assignment.abcSection}+併`, color: "yellow", mergeEligible: true };
+            }
+            return { text: "併", color: "yellow", mergeEligible: true };
+          }
+          // On default route but has abcSection
+          if (assignment.abcSection) {
+            return { text: assignment.abcSection, color: null, mergeEligible: true };
+          }
         }
-        // On default route but has abcSection
+
+        // Check if someone is covering this route (find assignment with this routeId from someone else)
+        const coverer = allDateAssignments.find((a) => {
+          if (a.employeeId === info.owner.id) return false;
+          const r = getRouteById(a.routeId);
+          return r && r.name === info.routeName;
+        });
+        if (coverer) {
+          const covEmp = getEmployeeById(coverer.employeeId);
+          if (covEmp) {
+            // Show covering employee's short name
+            return { text: covEmp.name, color: "lightblue", mergeEligible: true };
+          }
+        }
+
         if (assignment.abcSection) {
-          return { text: assignment.abcSection, color: null };
+          return { text: assignment.abcSection, color: null, mergeEligible: true };
         }
+        return { text: "", color: null, mergeEligible: true };
+      };
+
+      const result = computeCell();
+
+      // 檢查此路線是否被併線涉及（作為次要路線）
+      const isTaichungMergedRoute = hasMergedLine && isCompactMergedRoute(info.routeName);
+      if (isTaichungMergedRoute && result.text !== "X" && result.mergeEligible) {
+        if (result.text) {
+          if (!result.text.includes("+併")) {
+            result.text += "+併";
+          }
+        } else {
+          result.text = "併";
+        }
+        result.color = "yellow";
       }
 
-      // Check if someone is covering this route (find assignment with this routeId from someone else)
-      const coverer = allDateAssignments.find((a) => {
-        if (a.employeeId === info.owner.id) return false;
-        const r = getRouteById(a.routeId);
-        return r && r.name === info.routeName;
-      });
-      if (coverer) {
-        const covEmp = getEmployeeById(coverer.employeeId);
-        if (covEmp) {
-          // Show covering employee's short name
-          return { text: covEmp.name, color: "lightblue" };
-        }
-      }
-
-      if (assignment.abcSection) {
-        return { text: assignment.abcSection, color: null };
-      }
-      return { text: "", color: null };
+      delete result.mergeEligible;
+      return result;
     });
 
     const dateObj = new Date(`${dateStr}T00:00:00`);
