@@ -43,6 +43,7 @@ function ensureArrays(data) {
 }
 
 let syncStatusTimer = null;
+let scheduleMonitorPopup = null;
 function showSyncStatus(type, message) {
   const el = document.getElementById("syncStatus");
   if (!el) return;
@@ -411,6 +412,7 @@ function buildInitialState() {
       role: "operator",
       userId: nightOwner?.id || employees[0].id,
       lastGeneratedRange: null,
+      monitorWindowDate: getToday(),
     },
     labelSettings: {
       shifts: { day: "白班", evening: "晚班", night: "大夜班" },
@@ -535,6 +537,7 @@ function loadState() {
     });
     parsed.session = parsed.session || {};
     parsed.session.lastGeneratedRange = parsed.session.lastGeneratedRange || null;
+    parsed.session.monitorWindowDate = parsed.session.monitorWindowDate || getToday();
     parsed.labelSettings = parsed.labelSettings || {};
     parsed.labelSettings.leaveTypes = {
       annual: "特休",
@@ -691,6 +694,7 @@ let firebaseInitialized = false; // true after first Firebase load completes
 
 function saveState() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  renderScheduleMonitorWindow();
   if (firebaseReady && firebaseInitialized) {
     lastFirebaseSaveTime = Date.now();
     // Only sync non-session data to Firebase (session is per-device)
@@ -1543,8 +1547,516 @@ function renderSchedulingWorkbench(currentUser) {
   return renderSchedulingWorkbenchV2(currentUser);
 }
 
+function getScheduleMonitorDate() {
+  return state.session.monitorWindowDate || getToday();
+}
+
+function buildScheduleMonitorRows(dateString) {
+  return state.employees
+    .filter((employee) => employee.employmentStatus === "active")
+    .sort(compareEmployeesByScheduleOrder)
+    .map((employee) => {
+      const assignment = getDisplayAssignment(employee, dateString);
+      if (!assignment) return null;
+      const route = getRouteById(assignment.routeId);
+      const secondaryRoute = assignment.secondaryRouteId ? getRouteById(assignment.secondaryRouteId) : null;
+      const defaultRoute = getDefaultRoute(employee);
+      const routeDisplay = route
+        ? (secondaryRoute ? `上午：${route.name} / 下午：${secondaryRoute.name}` : route.name)
+        : "未指定";
+      const statusDisplay = assignment.status === "scheduled"
+        ? "固定班表"
+        : getLabel("statuses", assignment.status) + (secondaryRoute ? " / 併線" : "");
+      return {
+        employee,
+        assignment,
+        defaultRoute,
+        routeDisplay,
+        statusDisplay,
+      };
+    })
+    .filter(Boolean);
+}
+
+function renderScheduleMonitorWindow() {
+  if (!scheduleMonitorPopup || scheduleMonitorPopup.closed) {
+    scheduleMonitorPopup = null;
+    return;
+  }
+
+  const previewDate = getScheduleMonitorDate();
+  const rows = buildScheduleMonitorRows(previewDate);
+  const overrideCount = rows.filter((item) => item.assignment.source === "override").length;
+  const leaveCount = rows.filter((item) => item.assignment.status === "leave").reduce((sum, item) => {
+    return sum + (item.assignment.dayPart === "am" || item.assignment.dayPart === "pm" ? 0.5 : 1);
+  }, 0);
+  const unassignedCount = rows.filter((item) => !item.assignment.routeId && item.assignment.status !== "leave").length;
+
+  const rowHtml = rows.map((item) => `
+      <tr class="${item.assignment.source === "override" ? "override-row" : ""}">
+        <td>${item.employee.name}</td>
+        <td>${roleLabels[item.employee.role] || "-"}</td>
+        <td>${item.defaultRoute ? item.defaultRoute.name : "未設定"}</td>
+        <td>${item.routeDisplay}</td>
+        <td>${item.statusDisplay}</td>
+        <td>${item.assignment.source === "override" ? "異動" : "固定"}</td>
+        <td>${item.assignment.note || "-"}</td>
+      </tr>
+    `).join("");
+
+  scheduleMonitorPopup.document.open();
+  scheduleMonitorPopup.document.write(`<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <title>同步排班監看</title>
+  <style>
+    body { font-family: "Segoe UI", "Noto Sans TC", sans-serif; margin: 0; padding: 18px; background: #f6f1e8; color: #2f2418; }
+    h1 { margin: 0 0 6px; font-size: 20px; }
+    .topbar { display: flex; align-items: end; justify-content: space-between; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
+    .topbar p { margin: 0; color: #6f6254; }
+    .controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .controls label { display: flex; gap: 8px; align-items: center; font-weight: 600; color: #6f6254; }
+    .controls input { padding: 8px 10px; border-radius: 10px; border: 1px solid #d8c7b2; }
+    .meta { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+    .meta span { background: #fff8ef; border: 1px solid #ead8c2; border-radius: 999px; padding: 6px 10px; font-weight: 600; }
+    .meta span.alert { background: #fff0e8; border-color: #f0c4a8; color: #a0401a; }
+    table { width: 100%; border-collapse: collapse; background: #fffdf9; }
+    th, td { border-bottom: 1px solid #eadfd0; padding: 8px 10px; text-align: left; vertical-align: top; }
+    th { background: #f1e3d1; position: sticky; top: 0; z-index: 1; }
+    .table-wrap { max-height: calc(100vh - 180px); overflow: auto; border: 1px solid #eadfd0; border-radius: 12px; }
+    .override-row td { background: #fff7ef; }
+    .warn { color: #c9412f; font-weight: 700; }
+  </style>
+</head>
+<body>
+  <div class="topbar">
+    <div>
+      <h1>同步排班監看</h1>
+      <p>主畫面每次儲存排班、請假或代班後，這裡會自動同步更新。</p>
+    </div>
+    <div class="controls">
+      <label>監看日期 <input id="monitorDateInput" type="date" value="${previewDate}"></label>
+    </div>
+  </div>
+  <div class="meta">
+    <span>日期 ${formatDate(previewDate)}</span>
+    <span>顯示 ${rows.length} 人</span>
+    <span>異動 ${overrideCount} 筆</span>
+    <span>請假 ${leaveCount} 天</span>
+    <span class="${unassignedCount ? "alert" : ""}">未指定路線 ${unassignedCount} 筆</span>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>員工</th>
+          <th>角色</th>
+          <th>固定路線</th>
+          <th>當日路線</th>
+          <th>狀態</th>
+          <th>來源</th>
+          <th>備註</th>
+        </tr>
+      </thead>
+      <tbody>${rowHtml}</tbody>
+    </table>
+  </div>
+  <script>
+    document.getElementById('monitorDateInput').addEventListener('change', function (event) {
+      if (window.opener && !window.opener.closed && typeof window.opener.updateScheduleMonitorDate === 'function') {
+        window.opener.updateScheduleMonitorDate(event.target.value);
+      }
+    });
+  </script>
+</body>
+</html>`);
+  scheduleMonitorPopup.document.close();
+}
+
+function updateScheduleMonitorDate(dateString) {
+  if (!dateString) return;
+  state.session.monitorWindowDate = dateString;
+  saveState();
+}
+
+function openScheduleMonitorWindow(dateString = getScheduleMonitorDate()) {
+  state.session.monitorWindowDate = dateString || getToday();
+  scheduleMonitorPopup = window.open("", "schedule-monitor-window", "width=980,height=760,scrollbars=yes,resizable=yes");
+  if (!scheduleMonitorPopup) {
+    window.alert("請先允許瀏覽器開啟彈出視窗，才能查看同步排班監看視窗。");
+    return;
+  }
+  renderScheduleMonitorWindow();
+  scheduleMonitorPopup.focus();
+}
+
+function buildScheduleMonitorRows(dateString) {
+  return state.employees
+    .filter((employee) => employee.employmentStatus === "active")
+    .sort(compareEmployeesByScheduleOrder)
+    .map((employee) => {
+      const assignment = getDisplayAssignment(employee, dateString);
+      if (!assignment) return null;
+      const route = getRouteById(assignment.routeId);
+      const secondaryRoute = assignment.secondaryRouteId ? getRouteById(assignment.secondaryRouteId) : null;
+      const defaultRoute = getDefaultRoute(employee);
+      const routeDisplay = route
+        ? (secondaryRoute ? `(上)${route.name} (下)${secondaryRoute.name}` : route.name)
+        : "未指定";
+      const groupLabel = ["teamLeader", "supervisor", "relief", "support"].includes(employee.role)
+        ? (roleLabels[employee.role] || "其他")
+        : (defaultRoute ? defaultRoute.name : "其他");
+      return {
+        employee,
+        assignment,
+        routeDisplay,
+        groupLabel,
+      };
+    })
+    .filter(Boolean);
+}
+
+function renderScheduleMonitorWindow() {
+  if (!scheduleMonitorPopup || scheduleMonitorPopup.closed) {
+    scheduleMonitorPopup = null;
+    return;
+  }
+
+  const previewDate = getScheduleMonitorDate();
+  const rows = buildScheduleMonitorRows(previewDate);
+  const groupSpans = [];
+  rows.forEach((item) => {
+    const lastGroup = groupSpans[groupSpans.length - 1];
+    if (lastGroup && lastGroup.label === item.groupLabel) {
+      lastGroup.count += 1;
+      return;
+    }
+    groupSpans.push({ label: item.groupLabel, count: 1 });
+  });
+
+  const groupHeaderHtml = groupSpans.map((group) => `<th colspan="${group.count}">${group.label}</th>`).join("");
+  const nameHeaderHtml = rows.map((item) => `<th>${item.employee.name}</th>`).join("");
+  const assignmentRowHtml = rows.map((item) => {
+    const isUnassigned = !item.assignment.routeId && item.assignment.status !== "leave";
+    const className = isUnassigned ? "alert-cell" : "";
+    return `<td class="${className}">${item.routeDisplay}</td>`;
+  }).join("");
+
+  scheduleMonitorPopup.document.open();
+  scheduleMonitorPopup.document.write(`<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <title>同步排班監看</title>
+  <style>
+    body { font-family: "Segoe UI", "Noto Sans TC", sans-serif; margin: 0; padding: 18px; background: #f6f1e8; color: #2f2418; }
+    h1 { margin: 0 0 6px; font-size: 20px; }
+    .topbar { display: flex; align-items: end; justify-content: space-between; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
+    .controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .controls label { display: flex; gap: 8px; align-items: center; font-weight: 600; color: #6f6254; }
+    .controls input { padding: 8px 10px; border-radius: 10px; border: 1px solid #d8c7b2; }
+    .date-label { margin: 0 0 12px; font-size: 28px; font-weight: 800; color: #3a2614; }
+    .table-wrap { overflow: auto; border: 2px solid #c43c2f; background: #fffdf9; }
+    table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+    th, td { border: 1px solid #c9b59a; padding: 6px 4px; text-align: center; vertical-align: middle; word-break: break-word; }
+    thead tr:first-child th { background: #ffffff; font-size: 18px; border-top: 2px solid #c43c2f; }
+    thead tr:nth-child(2) th { background: #ffffff; font-size: 16px; }
+    tbody td { background: #fff35a; font-weight: 700; min-height: 42px; }
+    .alert-cell { background: #ffd9d4; color: #b2261d; }
+  </style>
+</head>
+<body>
+  <div class="topbar">
+    <h1>同步排班監看</h1>
+    <div class="controls">
+      <label>監看日期 <input id="monitorDateInput" type="date" value="${previewDate}"></label>
+    </div>
+  </div>
+  <p class="date-label">${formatDate(previewDate)}</p>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>${groupHeaderHtml}</tr>
+        <tr>${nameHeaderHtml}</tr>
+      </thead>
+      <tbody>
+        <tr>${assignmentRowHtml}</tr>
+      </tbody>
+    </table>
+  </div>
+  <script>
+    document.getElementById('monitorDateInput').addEventListener('change', function (event) {
+      if (window.opener && !window.opener.closed && typeof window.opener.updateScheduleMonitorDate === 'function') {
+        window.opener.updateScheduleMonitorDate(event.target.value);
+      }
+    });
+  </script>
+</body>
+</html>`);
+  scheduleMonitorPopup.document.close();
+}
+
+function buildScheduleMonitorRows(dateString) {
+  const data = buildMonthlyExportData(dateString, dateString);
+  const row = data.rows[0];
+  if (!row) {
+    return { headers: [], cells: [], dateLabel: formatDate(dateString) };
+  }
+
+  const headers = [
+    ...data.teamLeaderHeaders.map((header) => ({ group: "組長", name: header.name })),
+    ...data.reliefHeaders.map((header) => ({ group: "抵休", name: header.name })),
+    { group: "軍功/抵休", name: data.militaryReliefHeader.name || "" },
+    { group: "晚班/抵休", name: data.eveningReliefHeader.name || "" },
+    ...data.urbanRouteInfos.map((info) => ({ group: info.shortName, name: info.ownerShortName || "" })),
+  ];
+
+  const cells = [
+    ...row.teamLeaderCells,
+    ...row.reliefCells,
+    row.militaryCell,
+    row.eveningCell,
+    ...row.urbanCells,
+  ].map((cell) => ({
+    text: cell?.text || "",
+    color: cell?.color || null,
+  }));
+
+  return {
+    headers,
+    cells,
+    dateLabel: row.date || formatDate(dateString),
+  };
+}
+
+function renderScheduleMonitorWindow() {
+  if (!scheduleMonitorPopup || scheduleMonitorPopup.closed) {
+    scheduleMonitorPopup = null;
+    return;
+  }
+
+  const previewDate = getScheduleMonitorDate();
+  const monitorData = buildScheduleMonitorRows(previewDate);
+  const groupSpans = [];
+  monitorData.headers.forEach((item) => {
+    const lastGroup = groupSpans[groupSpans.length - 1];
+    if (lastGroup && lastGroup.label === item.group) {
+      lastGroup.count += 1;
+      return;
+    }
+    groupSpans.push({ label: item.group, count: 1 });
+  });
+
+  const groupHeaderHtml = groupSpans.map((group) => `<th colspan="${group.count}">${group.label}</th>`).join("");
+  const nameHeaderHtml = monitorData.headers.map((item) => `<th>${item.name || ""}</th>`).join("");
+  const assignmentRowHtml = monitorData.cells.map((item) => {
+    const className = item.color ? `${item.color}-cell` : "";
+    return `<td class="${className}">${item.text || ""}</td>`;
+  }).join("");
+
+  scheduleMonitorPopup.document.open();
+  scheduleMonitorPopup.document.write(`<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <title>同步排班監看</title>
+  <style>
+    body { font-family: "Segoe UI", "Noto Sans TC", sans-serif; margin: 0; padding: 18px; background: #f6f1e8; color: #2f2418; }
+    h1 { margin: 0 0 6px; font-size: 20px; }
+    .topbar { display: flex; align-items: end; justify-content: space-between; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
+    .controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .controls label { display: flex; gap: 8px; align-items: center; font-weight: 600; color: #6f6254; }
+    .controls input { padding: 8px 10px; border-radius: 10px; border: 1px solid #d8c7b2; }
+    .date-label { margin: 0 0 12px; font-size: 28px; font-weight: 800; color: #3a2614; }
+    .table-wrap { overflow: auto; border: 2px solid #c43c2f; background: #fffdf9; }
+    table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+    th, td { border: 1px solid #c9b59a; padding: 6px 4px; text-align: center; vertical-align: middle; word-break: break-word; }
+    thead tr:first-child th { background: #ffffff; font-size: 18px; border-top: 2px solid #c43c2f; }
+    thead tr:nth-child(2) th { background: #ffffff; font-size: 16px; }
+    tbody td { background: #ffffff; font-weight: 700; min-height: 42px; }
+    .yellow-cell { background: #fff35a; }
+    .green-cell { background: #a8dd6f; }
+    .lightblue-cell { background: #cfe8ff; }
+  </style>
+</head>
+<body>
+  <div class="topbar">
+    <h1>同步排班監看</h1>
+    <div class="controls">
+      <label>監看日期 <input id="monitorDateInput" type="date" value="${previewDate}"></label>
+    </div>
+  </div>
+  <p class="date-label">${monitorData.dateLabel}</p>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>${groupHeaderHtml}</tr>
+        <tr>${nameHeaderHtml}</tr>
+      </thead>
+      <tbody>
+        <tr>${assignmentRowHtml}</tr>
+      </tbody>
+    </table>
+  </div>
+  <script>
+    document.getElementById('monitorDateInput').addEventListener('change', function (event) {
+      if (window.opener && !window.opener.closed && typeof window.opener.updateScheduleMonitorDate === 'function') {
+        window.opener.updateScheduleMonitorDate(event.target.value);
+      }
+    });
+  </script>
+</body>
+</html>`);
+  scheduleMonitorPopup.document.close();
+}
+
+function buildScheduleMonitorRows(dateString) {
+  const monthRange = getMonthRange(dateString, 0);
+  const data = buildMonthlyExportData(monthRange.startDate, monthRange.endDate);
+  return {
+    ...data,
+    monitorDate: dateString,
+    monthRange,
+  };
+}
+
+function renderScheduleMonitorWindow() {
+  if (!scheduleMonitorPopup || scheduleMonitorPopup.closed) {
+    scheduleMonitorPopup = null;
+    return;
+  }
+
+  const previewDate = getScheduleMonitorDate();
+  const monitorData = buildScheduleMonitorRows(previewDate);
+  const colorClassMap = {
+    yellow: "yellow-cell",
+    green: "green-cell",
+    lightblue: "lightblue-cell",
+    orange: "orange-cell",
+  };
+
+  const groupHeaderHtml = [
+    ...monitorData.teamLeaderHeaders.map(() => `<th class="group-cell">組長</th>`),
+    ...monitorData.reliefHeaders.map(() => `<th class="group-cell">抵休</th>`),
+    `<th class="group-cell">軍功/抵休</th>`,
+    `<th class="group-cell">晚班/抵休</th>`,
+    ...monitorData.urbanRouteInfos.map((info) => `<th class="group-cell">${info.shortName}</th>`),
+  ].join("");
+
+  const nameHeaderHtml = [
+    ...monitorData.teamLeaderHeaders.map((header) => `<th>${header.name}</th>`),
+    ...monitorData.reliefHeaders.map((header) => `<th>${header.name}</th>`),
+    `<th>${monitorData.militaryReliefHeader.name || ""}</th>`,
+    `<th>${monitorData.eveningReliefHeader.name || ""}</th>`,
+    ...monitorData.urbanRouteInfos.map((info) => `<th>${info.ownerShortName || ""}</th>`),
+  ].join("");
+
+  const bodyHtml = monitorData.rows.map((row, index) => {
+    const nextRow = monitorData.rows[index + 1];
+    const currentDate = new Date(`${row.dateRaw}T00:00:00`);
+    const nextDate = nextRow ? new Date(`${nextRow.dateRaw}T00:00:00`) : null;
+    const isWeekBoundary = !!nextDate && nextDate.getDay() <= currentDate.getDay();
+    const cells = [
+      ...row.teamLeaderCells,
+      ...row.reliefCells,
+      row.militaryCell,
+      row.eveningCell,
+      ...row.urbanCells,
+    ].map((cell) => {
+      const className = colorClassMap[cell?.color] || "";
+      return `<td class="${className}">${cell?.text || ""}</td>`;
+    }).join("");
+    return `
+      <tr class="${isWeekBoundary ? "week-separator" : ""}">
+        <td class="date-col">${row.workDay}</td>
+        <td class="date-col">${row.date}</td>
+        ${cells}
+      </tr>
+    `;
+  }).join("");
+
+  scheduleMonitorPopup.document.open();
+  scheduleMonitorPopup.document.write(`<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <title>同步排班監看</title>
+  <style>
+    body { font-family: "Segoe UI", "Noto Sans TC", sans-serif; margin: 0; padding: 18px; background: #f6f1e8; color: #2f2418; }
+    h1 { margin: 0 0 6px; font-size: 20px; }
+    .topbar { display: flex; align-items: end; justify-content: space-between; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
+    .controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .controls label { display: flex; gap: 8px; align-items: center; font-weight: 600; color: #6f6254; }
+    .controls input { padding: 8px 10px; border-radius: 10px; border: 1px solid #d8c7b2; }
+    .date-label { margin: 0 0 12px; font-size: 28px; font-weight: 800; color: #3a2614; }
+    .table-wrap { overflow: auto; border: 2px solid #c43c2f; background: #fffdf9; max-height: calc(100vh - 140px); }
+    table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+    th, td { border: 1px solid #c9b59a; padding: 6px 4px; text-align: center; vertical-align: middle; word-break: break-word; }
+    thead th { background: #ffffff; position: sticky; top: 0; z-index: 2; }
+    thead tr:first-child th { font-size: 14px; border-top: 2px solid #c43c2f; }
+    thead tr:nth-child(2) th { font-size: 15px; }
+    .group-cell { background: #ffffff; color: #000; font-weight: 700; }
+    .date-col { background: #ffffff; font-weight: 700; white-space: nowrap; }
+    tbody td { background: #ffffff; font-weight: 700; min-height: 34px; font-size: 14px; }
+    .yellow-cell { background: #fff35a; }
+    .green-cell { background: #a8dd6f; }
+    .lightblue-cell { background: #cfe8ff; }
+    .orange-cell { background: #ffd9a6; }
+    .week-separator td { border-bottom: 4px solid #d93025; }
+  </style>
+</head>
+<body>
+  <div class="topbar">
+    <h1>同步排班監看</h1>
+    <div class="controls">
+      <label>監看日期 <input id="monitorDateInput" type="date" value="${previewDate}"></label>
+    </div>
+  </div>
+  <p class="date-label">${monitorData.title}</p>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th rowspan="2" class="group-cell">工作天</th>
+          <th rowspan="2" class="group-cell">日期</th>
+          ${groupHeaderHtml}
+        </tr>
+        <tr>${nameHeaderHtml}</tr>
+      </thead>
+      <tbody>${bodyHtml}</tbody>
+    </table>
+  </div>
+  <script>
+    document.getElementById('monitorDateInput').addEventListener('change', function (event) {
+      if (window.opener && !window.opener.closed && typeof window.opener.updateScheduleMonitorDate === 'function') {
+        window.opener.updateScheduleMonitorDate(event.target.value);
+      }
+    });
+  </script>
+</body>
+</html>`);
+  scheduleMonitorPopup.document.close();
+}
+
+function openScheduleMonitorWindow(dateString = getScheduleMonitorDate()) {
+  state.session.monitorWindowDate = dateString || getToday();
+  scheduleMonitorPopup = window.open("", "schedule-monitor-window", "width=1600,height=900,scrollbars=yes,resizable=yes");
+  if (!scheduleMonitorPopup) {
+    window.alert("請先允許瀏覽器開啟彈出視窗，才能查看同步排班監看視窗。");
+    return;
+  }
+  renderScheduleMonitorWindow();
+  scheduleMonitorPopup.focus();
+}
+
 function renderSchedulingWorkbenchV2(currentUser) {
   const section = createSection("排班與異動工作台", "先生成固定班表，再針對請假、代班或支援做後續調整。");
+  const monitorButton = document.createElement("button");
+  monitorButton.type = "button";
+  monitorButton.className = "secondary";
+  monitorButton.textContent = "開啟同步視窗";
+  section.querySelector(".section-heading").appendChild(monitorButton);
   const grid = document.createElement("div");
   grid.className = "panel-grid";
 
@@ -1647,6 +2159,34 @@ function renderSchedulingWorkbenchV2(currentUser) {
 
   grid.append(defaultForm, leaveForm, reliefForm, editPanel, specialNotePanel);
   section.appendChild(grid);
+
+  const syncMonitorDate = (dateString) => {
+    if (!dateString) return;
+    if (state.session.monitorWindowDate === dateString) {
+      renderScheduleMonitorWindow();
+      return;
+    }
+    updateScheduleMonitorDate(dateString);
+  };
+
+  const watchFormStartDate = (container, selector = 'input[name="startDate"]') => {
+    const input = container.querySelector(selector);
+    if (!input) return;
+    input.addEventListener("change", () => syncMonitorDate(input.value));
+  };
+
+  monitorButton.addEventListener("click", () => {
+    const reliefStartDate = reliefForm.querySelector('input[name="startDate"]')?.value;
+    const leaveStartDate = leaveForm.querySelector('input[name="startDate"]')?.value;
+    const defaultStartDate = defaultForm.querySelector('input[name="startDate"]')?.value;
+    openScheduleMonitorWindow(reliefStartDate || leaveStartDate || defaultStartDate || getScheduleMonitorDate());
+  });
+
+  watchFormStartDate(defaultForm);
+  watchFormStartDate(leaveForm);
+  watchFormStartDate(reliefForm);
+  watchFormStartDate(specialNotePanel);
+  watchFormStartDate(editPanel, "#editLookupStartDate");
 
   editPanel.querySelector("#editLookupButton").addEventListener("click", () => {
     const startDate = editPanel.querySelector("#editLookupStartDate").value;
@@ -4030,6 +4570,7 @@ function applyFirebaseState(firebaseState) {
   });
   state.session = state.session || {};
   state.session.lastGeneratedRange = state.session.lastGeneratedRange || null;
+  state.session.monitorWindowDate = state.session.monitorWindowDate || getToday();
   state.labelSettings = state.labelSettings || {};
   state.labelSettings.leaveTypes = {
     annual: "特休", personal: "事假", sick: "病假",
