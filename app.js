@@ -934,7 +934,7 @@ function buildMonthlyExportData(startDate, endDate) {
     const specialNotes = [...new Set([...dateNotes, ...assignmentNotes])];
     const hasMergedLine = allDateAssignments.some((a) => a.isMergedLine);
     const mergedLineRoutes = hasMergedLine ? ["★"] : [];
-    const compactMergedRouteNames = new Set(["市政段", "黎明段"]);
+    const compactMergedRouteNames = new Set(["市政段", "黎明段", "南區段(晚班)"]);
     const isCompactMergedRoute = (routeName) => compactMergedRouteNames.has(routeName);
     const formatMergedAssignmentText = ({ route, secRoute, defaultRoute }) => {
       if (!route) return "";
@@ -942,7 +942,9 @@ function buildMonthlyExportData(startDate, endDate) {
       if (isOwnRoute) {
         return isCompactMergedRoute(route.name)
           ? "併"
-          : (secRoute ? `(上)${route.name}\n(下)${secRoute.name}` : route.name);
+          : (secRoute
+            ? `(上)${route.name}\n(下)${secRoute.name}${isCompactMergedRoute(secRoute.name) && hasMergedLine ? "+併" : ""}`
+            : route.name);
       }
       return `${route.name}+併`;
     };
@@ -2267,8 +2269,12 @@ function openMonthlySchedulePrintWindow(startDate, endDate) {
 
   // Build data rows
   let dataRows = "";
-  data.rows.forEach((row) => {
-    dataRows += "<tr>";
+  data.rows.forEach((row, index) => {
+    const nextRow = data.rows[index + 1];
+    const currentDate = new Date(`${row.dateRaw}T00:00:00`);
+    const nextDate = nextRow ? new Date(`${nextRow.dateRaw}T00:00:00`) : null;
+    const isWeekBoundary = !!nextDate && nextDate.getDay() <= currentDate.getDay();
+    dataRows += `<tr${isWeekBoundary ? ' class="week-separator"' : ""}>`;
     dataRows += `<td style="text-align:center;font-weight:bold;">${row.workDay}</td>`;
     dataRows += `<td style="white-space:nowrap;font-weight:bold;">${row.date}</td>`;
     // Each leave employee gets their own cell with leave-type color
@@ -2305,6 +2311,7 @@ function openMonthlySchedulePrintWindow(startDate, endDate) {
     th, td { border: 1px solid #b0a090; padding: 2px 3px; text-align: center; vertical-align: middle; overflow: hidden; word-break: break-all; }
     th { background: #fff; font-size: 11px; color: #000; font-weight: bold; }
     .note-row td { font-size: 12px; padding: 3px 5px; }
+    .week-separator td { border-bottom: 4px solid #d93025 !important; }
     /* Auto-fit text in cells */
     td .cell-text { display: inline-block; max-width: 100%; white-space: nowrap; }
     .btn-row { margin-bottom: 12px; }
