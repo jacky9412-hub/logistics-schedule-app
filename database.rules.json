@@ -1,0 +1,106 @@
+{
+  "rules": {
+    "appState": {
+      ".read": true,
+      ".write": true,
+      ".validate": "newData.hasChildren(['employees', 'routes', 'assignments'])",
+      "employees": {
+        ".validate": "newData.hasChildren([])",
+        "$empId": {
+          ".validate": "newData.hasChildren(['id', 'name', 'role'])",
+          "id":               { ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length < 64" },
+          "name":             { ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length < 50" },
+          "role":             { ".validate": "newData.isString() && newData.val().matches(/^(operator|teamLeader|reliefStaff|adminStaff|supervisor)$/)" },
+          "employmentStatus": { ".validate": "newData.isString() && newData.val().matches(/^(active|resigned|unpaidLeave)$/)" },
+          "shift":            { ".validate": "newData.isString() && newData.val().matches(/^(day|evening|night)$/)" },
+          "active":           { ".validate": "newData.isBoolean()" },
+          "isRelief":         { ".validate": "newData.isBoolean()" },
+          "canCoverShift":    { ".validate": "newData.isBoolean()" },
+          "isNightOwner":     { ".validate": "newData.isBoolean()" },
+          "defaultRouteId":   { ".validate": "newData.isString()" },
+          "fixedDuty":        { ".validate": "newData.isString()" },
+          "supportLineIds":   { ".validate": "newData.hasChildren([])" },
+          "$other": { ".validate": false }
+        }
+      },
+      "routes": {
+        "$routeId": {
+          ".validate": "newData.hasChildren(['id', 'name', 'type'])",
+          "id":              { ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length < 64" },
+          "name":            { ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length < 50" },
+          "type":            { ".validate": "newData.isString() && newData.val().matches(/^(car|scooter|special)$/)" },
+          "approvedMileage": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() < 10000" },
+          "$other": { ".validate": false }
+        }
+      },
+      "assignments": {
+        "$asgId": {
+          ".validate": "newData.hasChildren(['id', 'date', 'employeeId', 'routeId', 'status'])",
+          "id":          { ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length < 64" },
+          "date":        { ".validate": "newData.isString() && newData.val().matches(/^\\d{4}-\\d{2}-\\d{2}$/)" },
+          "employeeId":  { ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length < 64" },
+          "routeId":     { ".validate": "newData.isString() && newData.val().length < 64" },
+          "shift":       { ".validate": "newData.isString() && newData.val().matches(/^(day|evening|night)$/)" },
+          "status":      { ".validate": "newData.isString() && newData.val().matches(/^(working|leave|reassigned|standby)$/)" },
+          "leaveType":   { ".validate": "newData.isString()" },
+          "source":      { ".validate": "newData.isString() && newData.val().matches(/^(default|override)$/)" },
+          "note":        { ".validate": "newData.isString() && newData.val().length < 500" },
+          "dayPart":     { ".validate": "newData.isString() && newData.val().matches(/^(am|pm|full)$/)" },
+          "abcSection":  { ".validate": "newData.isString() && newData.val().length < 10" },
+          "secondaryRouteId": { ".validate": "newData.isString() && newData.val().length < 64" },
+          "specialNote": { ".validate": "newData.isString() && newData.val().length < 500" },
+          "$other": { ".validate": false }
+        }
+      },
+      "pinSettings": {
+        "teamLeader":  { ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 64" },
+        "adminStaff":  { ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 64" },
+        "supervisor":  { ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 64" },
+        "individual": {
+          "$empId": { ".validate": "newData.isString() && newData.val().length <= 64" }
+        }
+      },
+      "companySettings": {
+        "weekendDaysOff": { ".validate": "newData.isBoolean()" },
+        "holidays": {
+          "$idx": { ".validate": "newData.isString() && newData.val().matches(/^\\d{4}-\\d{2}-\\d{2}$/)" }
+        }
+      },
+      "auditLogs": {
+        "$logId": {
+          "id":         { ".validate": "newData.isString()" },
+          "timestamp":  { ".validate": "newData.isString()" },
+          "actorId":    { ".validate": "newData.isString()" },
+          "action":     { ".validate": "newData.isString() && newData.val().length < 100" },
+          "targetType": { ".validate": "newData.isString()" },
+          "targetId":   { ".validate": "newData.isString()" },
+          "summary":    { ".validate": "newData.isString() && newData.val().length < 200" },
+          "detail":     { ".validate": "newData.isString() && newData.val().length < 1000" }
+        }
+      },
+      "mileageTable": {
+        "$idx": {
+          "id":    { ".validate": "newData.isNumber()" },
+          "name":  { ".validate": "newData.isString() && newData.val().length < 50" },
+          "total": { ".validate": "newData.isNumber() || newData.isString()" },
+          "note":  { ".validate": "newData.isString() && newData.val().length < 200" }
+        }
+      },
+      "dateSpecialNotes": {
+        "$idx": {
+          "id":        { ".validate": "newData.isString()" },
+          "startDate": { ".validate": "newData.isString() && newData.val().matches(/^\\d{4}-\\d{2}-\\d{2}$/)" },
+          "endDate":   { ".validate": "newData.isString() && newData.val().matches(/^\\d{4}-\\d{2}-\\d{2}$/)" },
+          "note":      { ".validate": "newData.isString() && newData.val().length < 500" }
+        }
+      },
+      "exportNote": { ".validate": "newData.isString() && newData.val().length < 2000" },
+      "labelSettings": {
+        "$group": {
+          "$key": { ".validate": "newData.isString() && newData.val().length < 20" }
+        }
+      },
+      "$other": { ".validate": false }
+    }
+  }
+}

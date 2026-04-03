@@ -9,6 +9,25 @@ function escHtml(str) {
   return String(str).replace(/[&<>"']/g, (c) => escMap[c]);
 }
 
+// ─── PIN Hashing (Web Crypto API) ───
+// Stored PINs are SHA-256 hashes (64-char hex). Plaintext PINs are migrated on next save.
+async function hashPin(pin) {
+  if (!pin) return "";
+  const data = new TextEncoder().encode("chex-pin:" + pin);
+  const buf = await crypto.subtle.digest("SHA-256", data);
+  return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+function isPinHashed(value) {
+  return typeof value === "string" && value.length === 64 && /^[0-9a-f]{64}$/.test(value);
+}
+
+async function pinMatches(input, stored) {
+  if (!stored) return false;
+  if (isPinHashed(stored)) return (await hashPin(input)) === stored;
+  return input === stored; // fallback for legacy plaintext (migrated on next save)
+}
+
 // ─── Firebase Configuration ───
 const firebaseConfig = {
   apiKey: "AIzaSyBl8BuPyoaHAIoa4yQkkmAHSgvl1l3kZsw",
@@ -665,7 +684,7 @@ async function requirePin(role) {
   if (authenticatedRoles.has(role)) return true;
   const pin = await showPinDialog(`請輸入「${roleLabels[role]}」的 PIN 碼`);
   if (pin === null) return false;
-  if (pin === state.pinSettings[role]) {
+  if (await pinMatches(pin, state.pinSettings[role])) {
     authenticatedRoles.add(role);
     saveAuthCache();
     return true;
@@ -683,7 +702,7 @@ async function requireUserPin(employeeId) {
   if (!correctPin) return true;
   const pin = await showPinDialog(`請輸入「${emp.name}」的個人 PIN 碼`);
   if (pin === null) return false;
-  if (pin === correctPin) {
+  if (await pinMatches(pin, correctPin)) {
     authenticatedUsers.add(employeeId);
     authenticatedRoles.add(emp.role);
     saveAuthCache();
@@ -703,22 +722,42 @@ const statCardTemplate = document.querySelector("#statCardTemplate");
 
 let firebaseInitialized = false; // true after first Firebase load completes
 
+// ─── Lookup Map Cache (invalidated on state mutation) ───
+let _employeeMap = null;
+let _routeMap = null;
+let _assignmentIndex = null;       // Map<"empId:date", Assignment[]>
+let _assignmentsByDateIndex = null; // Map<"date", Assignment[]>
+
+function invalidateLookupMaps() {
+  _employeeMap = null;
+  _routeMap = null;
+  _assignmentIndex = null;
+  _assignmentsByDateIndex = null;
+}
+
+// ─── Firebase write debounce ───
+let _saveFirebaseTimer = null;
+
 function saveState() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  invalidateLookupMaps();
   renderScheduleMonitorWindow();
   if (firebaseReady && firebaseInitialized) {
-    lastFirebaseSaveTime = Date.now();
-    // Only sync non-session data to Firebase (session is per-device)
-    const syncData = { ...state };
-    delete syncData.session;
-    stateRef.set(syncData)
-      .then(() => {
-        lastFirebaseSaveTime = Date.now();
-      })
-      .catch((err) => {
-        showSyncStatus("error", "同步失敗：" + err.message);
-        console.warn("Firebase save failed:", err);
-      });
+    clearTimeout(_saveFirebaseTimer);
+    _saveFirebaseTimer = setTimeout(() => {
+      lastFirebaseSaveTime = Date.now();
+      // Only sync non-session data to Firebase (session is per-device)
+      const syncData = { ...state };
+      delete syncData.session;
+      stateRef.set(syncData)
+        .then(() => {
+          lastFirebaseSaveTime = Date.now();
+        })
+        .catch((err) => {
+          showSyncStatus("error", "同步失敗：" + err.message);
+          console.warn("Firebase save failed:", err);
+        });
+    }, 500);
   }
 }
 
@@ -731,7 +770,8 @@ function getToday() {
 }
 
 function getEmployeeById(id) {
-  return state.employees.find((employee) => employee.id === id);
+  if (!_employeeMap) _employeeMap = new Map(state.employees.map((e) => [e.id, e]));
+  return _employeeMap.get(id);
 }
 
 function compareEmployeesByScheduleOrder(a, b) {
@@ -751,7 +791,8 @@ function compareEmployeesByScheduleOrder(a, b) {
 }
 
 function getRouteById(id) {
-  return state.routes.find((route) => route.id === id);
+  if (!_routeMap) _routeMap = new Map(state.routes.map((r) => [r.id, r]));
+  return _routeMap.get(id);
 }
 
 function getDefaultRoute(employee) {
@@ -764,18 +805,33 @@ function getAssignmentsForEmployee(employeeId) {
     .sort((a, b) => a.date.localeCompare(b.date));
 }
 
+function _buildAssignmentIndex() {
+  _assignmentIndex = new Map();
+  _assignmentsByDateIndex = new Map();
+  state.assignments.forEach((a) => {
+    const empDateKey = `${a.employeeId}:${a.date}`;
+    if (!_assignmentIndex.has(empDateKey)) _assignmentIndex.set(empDateKey, []);
+    _assignmentIndex.get(empDateKey).push(a);
+    if (!_assignmentsByDateIndex.has(a.date)) _assignmentsByDateIndex.set(a.date, []);
+    _assignmentsByDateIndex.get(a.date).push(a);
+  });
+}
+
 function getAssignmentByEmployeeDate(employeeId, dateString) {
-  const all = state.assignments.filter((a) => a.employeeId === employeeId && a.date === dateString);
+  if (!_assignmentIndex) _buildAssignmentIndex();
+  const all = _assignmentIndex.get(`${employeeId}:${dateString}`) || [];
   return all.find((a) => !a.dayPart || a.dayPart === "full") || all[0] || undefined;
 }
 
 function getAssignmentsByEmployeeDate(employeeId, dateString) {
-  return state.assignments.filter((a) => a.employeeId === employeeId && a.date === dateString);
+  if (!_assignmentIndex) _buildAssignmentIndex();
+  return _assignmentIndex.get(`${employeeId}:${dateString}`) || [];
 }
 
 function getAssignmentsByDate(dateString) {
-  return state.assignments
-    .filter((assignment) => assignment.date === dateString)
+  if (!_assignmentsByDateIndex) _buildAssignmentIndex();
+  return (_assignmentsByDateIndex.get(dateString) || [])
+    .slice()
     .sort((a, b) => compareEmployeesByScheduleOrder(getEmployeeById(a.employeeId), getEmployeeById(b.employeeId)));
 }
 
@@ -793,14 +849,15 @@ function displayRouteType(type) {
   return routeTypeLabels[type] || type;
 }
 
+const _dateFmt = new Intl.DateTimeFormat("zh-TW", { month: "numeric", day: "numeric", weekday: "short" });
+const _tsFmt = new Intl.DateTimeFormat("zh-TW", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
+
 function formatDate(dateString) {
-  return new Intl.DateTimeFormat("zh-TW", { month: "numeric", day: "numeric", weekday: "short" })
-    .format(new Date(`${dateString}T00:00:00`));
+  return _dateFmt.format(new Date(`${dateString}T00:00:00`));
 }
 
 function formatTimestamp(timestamp) {
-  return new Intl.DateTimeFormat("zh-TW", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })
-    .format(new Date(timestamp));
+  return _tsFmt.format(new Date(timestamp));
 }
 
 function getMonthRange(baseDateString = getToday(), offsetMonths = 0) {
@@ -3527,7 +3584,8 @@ function renderMasterDataPanel(currentUser) {
       .sort(compareEmployeesByScheduleOrder)
       .map((emp) => {
         const individualPin = (state.pinSettings.individual && state.pinSettings.individual[emp.id]) || "";
-        return `<label>${escHtml(emp.name)}（${roleLabels[emp.role]}）<input name="individual_${escHtml(emp.id)}" type="password" value="${escHtml(individualPin)}" maxlength="8" placeholder="未設定則用角色預設"></label>`;
+        const hasPin = !!individualPin;
+        return `<label>${escHtml(emp.name)}（${roleLabels[emp.role]}）<input name="individual_${escHtml(emp.id)}" type="password" value="" maxlength="8" placeholder="${hasPin ? "已設定（留空保持不變）" : "未設定則用角色預設"}"></label>`;
       })
       .join("");
 
@@ -3542,9 +3600,9 @@ function renderMasterDataPanel(currentUser) {
       <form id="pinForm" class="form-grid">
         <div class="card stat-card">
           <p class="stat-label">角色預設 PIN（通用）</p>
-          <label>組長預設 PIN<input name="teamLeader" type="password" value="${state.pinSettings.teamLeader}" maxlength="8" required></label>
-          <label>行政預設 PIN<input name="adminStaff" type="password" value="${state.pinSettings.adminStaff}" maxlength="8" required></label>
-          <label>主管預設 PIN<input name="supervisor" type="password" value="${state.pinSettings.supervisor}" maxlength="8" required></label>
+          <label>組長預設 PIN<input name="teamLeader" type="password" value="" maxlength="8" placeholder="留空保持不變" autocomplete="new-password"></label>
+          <label>行政預設 PIN<input name="adminStaff" type="password" value="" maxlength="8" placeholder="留空保持不變" autocomplete="new-password"></label>
+          <label>主管預設 PIN<input name="supervisor" type="password" value="" maxlength="8" placeholder="留空保持不變" autocomplete="new-password"></label>
         </div>
         <div class="card stat-card">
           <p class="stat-label">個人 PIN（優先於角色預設）</p>
@@ -3637,23 +3695,26 @@ function renderMasterDataPanel(currentUser) {
   });
 
   if (currentUser.role === "supervisor" && pinPanel.querySelector("#pinForm")) {
-    pinPanel.querySelector("#pinForm").addEventListener("submit", (event) => {
+    pinPanel.querySelector("#pinForm").addEventListener("submit", async (event) => {
       event.preventDefault();
       const fd = new FormData(event.currentTarget);
-      state.pinSettings.teamLeader = fd.get("teamLeader").trim() || "1234";
-      state.pinSettings.adminStaff = fd.get("adminStaff").trim() || "1234";
-      state.pinSettings.supervisor = fd.get("supervisor").trim() || "0000";
-      // Save individual PINs
+      // Only update role PINs if a new value is entered; otherwise keep existing hash
+      const tlRaw = fd.get("teamLeader").trim();
+      const asRaw = fd.get("adminStaff").trim();
+      const svRaw = fd.get("supervisor").trim();
+      if (tlRaw) state.pinSettings.teamLeader = await hashPin(tlRaw);
+      if (asRaw) state.pinSettings.adminStaff = await hashPin(asRaw);
+      if (svRaw) state.pinSettings.supervisor = await hashPin(svRaw);
+      // Save individual PINs (hash non-empty values; empty = keep existing)
       if (!state.pinSettings.individual) state.pinSettings.individual = {};
       for (const [key, value] of fd.entries()) {
         if (key.startsWith("individual_")) {
           const empId = key.replace("individual_", "");
           const pin = value.trim();
           if (pin) {
-            state.pinSettings.individual[empId] = pin;
-          } else {
-            delete state.pinSettings.individual[empId];
+            state.pinSettings.individual[empId] = await hashPin(pin);
           }
+          // Leave blank = keep existing (don't delete)
         }
       }
       logAction({
@@ -3662,7 +3723,7 @@ function renderMasterDataPanel(currentUser) {
         targetType: "settings",
         targetId: "pin-settings",
         summary: "更新 PIN 碼設定",
-        detail: "已更新角色預設 PIN 碼與個人 PIN 碼。",
+        detail: "已更新角色預設 PIN 碼與個人 PIN 碼（已加密儲存）。",
       });
       // Clear authenticated cache so new PINs take effect
       authenticatedUsers.clear();
@@ -4053,6 +4114,7 @@ function renderDataManagementPanel(currentUser) {
     if (!doubleConfirm) return;
     localStorage.removeItem(STORAGE_KEY);
     state = buildInitialState();
+    invalidateLookupMaps();
     // Clear Firebase too
     if (firebaseReady) {
       stateRef.set(state).then(() => {
@@ -4230,6 +4292,7 @@ render();
 function applyFirebaseState(firebaseState) {
   const localSession = { ...state.session };
   state = firebaseState;
+  invalidateLookupMaps();
   state.session = localSession;
   // Run migrations (name rename + role fixes)
   applyEmployeeMigrations(state);
@@ -4262,12 +4325,38 @@ function applyFirebaseState(firebaseState) {
   }
   // Apply employee role migrations and save back to Firebase if changed
   const migrated = applyEmployeeMigrations(state);
-  if (migrated) {
-    saveState();
-  } else {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  // Migrate plaintext PINs to hashes (one-time, silent)
+  migratePlaintextPins().then((pinsMigrated) => {
+    if (migrated || pinsMigrated) {
+      saveState();
+    } else {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    }
+    render();
+  });
+}
+
+// Hash any plaintext PINs still in state (migration from pre-hash era)
+async function migratePlaintextPins() {
+  if (!state.pinSettings) return false;
+  let changed = false;
+  const roleKeys = ["teamLeader", "adminStaff", "supervisor"];
+  for (const key of roleKeys) {
+    const val = state.pinSettings[key];
+    if (val && !isPinHashed(val)) {
+      state.pinSettings[key] = await hashPin(val);
+      changed = true;
+    }
   }
-  render();
+  if (state.pinSettings.individual) {
+    for (const [empId, val] of Object.entries(state.pinSettings.individual)) {
+      if (val && !isPinHashed(val)) {
+        state.pinSettings.individual[empId] = await hashPin(val);
+        changed = true;
+      }
+    }
+  }
+  return changed;
 }
 
 function startFirebaseListener() {
@@ -4285,6 +4374,7 @@ function startFirebaseListener() {
     }
     const localSession = { ...state.session };
     state = remoteState;
+    invalidateLookupMaps();
     state.session = localSession;
     // Apply role migrations after Firebase sync
     const migrated = applyEmployeeMigrations(state);
