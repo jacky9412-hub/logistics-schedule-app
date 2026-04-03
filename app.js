@@ -5,12 +5,8 @@ const MAX_AUDIT_LOGS = 500;
 // ─── XSS Protection ───
 function escHtml(str) {
   if (!str) return "";
-  return String(str)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
+  const escMap = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" };
+  return String(str).replace(/[&<>"']/g, (c) => escMap[c]);
 }
 
 // ─── Firebase Configuration ───
@@ -631,7 +627,7 @@ function showPinDialog(title) {
     const dialog = document.createElement("div");
     dialog.className = "pin-dialog";
     dialog.innerHTML = `
-      <p class="pin-title">${title}</p>
+      <p class="pin-title">${escHtml(title)}</p>
       <input type="password" class="pin-input" maxlength="8" placeholder="請輸入 PIN 碼" autocomplete="off">
       <div class="pin-error" style="display:none">PIN 碼錯誤</div>
       <div class="pin-buttons">
@@ -1197,7 +1193,7 @@ function createSection(title, subtitle = "") {
   section.className = "card panel";
   const heading = document.createElement("div");
   heading.className = "section-heading";
-  heading.innerHTML = `<div><h2>${title}</h2>${subtitle ? `<p class="muted">${subtitle}</p>` : ""}</div>`;
+  heading.innerHTML = `<div><h2>${escHtml(title)}</h2>${subtitle ? `<p class="muted">${escHtml(subtitle)}</p>` : ""}</div>`;
   section.appendChild(heading);
   return section;
 }
@@ -1258,7 +1254,7 @@ function syncSelectors() {
           const val = `${role}:${user.id}`;
           const currentVal = `${state.session.role}:${state.session.userId}`;
           const isSelected = (state.session.role === role && state.session.userId === user.id);
-          roleOptions += `<option value="${val}" ${isSelected ? "selected" : ""}>${label} - ${user.name}</option>`;
+          roleOptions += `<option value="${escHtml(val)}" ${isSelected ? "selected" : ""}>${escHtml(label)} - ${escHtml(user.name)}</option>`;
         });
       } else {
         // Only one person, show normally
@@ -1276,7 +1272,7 @@ function syncSelectors() {
     state.session.userId = users[0]?.id || "";
   }
   userSelect.innerHTML = users
-    .map((user) => `<option value="${user.id}" ${state.session.userId === user.id ? "selected" : ""}>${user.name}</option>`)
+    .map((user) => `<option value="${escHtml(user.id)}" ${state.session.userId === user.id ? "selected" : ""}>${escHtml(user.name)}</option>`)
     .join("");
 }
 
@@ -1600,15 +1596,15 @@ function renderScheduleMonitorWindow() {
     ...monitorData.reliefHeaders.map(() => `<th class="group-cell">抵休</th>`),
     `<th class="group-cell">軍功/抵休</th>`,
     `<th class="group-cell">晚班/抵休</th>`,
-    ...monitorData.urbanRouteInfos.map((info) => `<th class="group-cell">${info.shortName}</th>`),
+    ...monitorData.urbanRouteInfos.map((info) => `<th class="group-cell">${escHtml(info.shortName)}</th>`),
   ].join("");
 
   const nameHeaderHtml = [
-    ...monitorData.teamLeaderHeaders.map((header) => `<th>${header.name}</th>`),
-    ...monitorData.reliefHeaders.map((header) => `<th>${header.name}</th>`),
-    `<th>${monitorData.militaryReliefHeader.name || ""}</th>`,
-    `<th>${monitorData.eveningReliefHeader.name || ""}</th>`,
-    ...monitorData.urbanRouteInfos.map((info) => `<th>${info.ownerShortName || ""}</th>`),
+    ...monitorData.teamLeaderHeaders.map((header) => `<th>${escHtml(header.name)}</th>`),
+    ...monitorData.reliefHeaders.map((header) => `<th>${escHtml(header.name)}</th>`),
+    `<th>${escHtml(monitorData.militaryReliefHeader.name || "")}</th>`,
+    `<th>${escHtml(monitorData.eveningReliefHeader.name || "")}</th>`,
+    ...monitorData.urbanRouteInfos.map((info) => `<th>${escHtml(info.ownerShortName || "")}</th>`),
   ].join("");
 
   const bodyHtml = monitorData.rows.map((row, index) => {
@@ -1624,7 +1620,7 @@ function renderScheduleMonitorWindow() {
       ...row.urbanCells,
     ].map((cell) => {
       const className = colorClassMap[cell?.color] || "";
-      return `<td class="${className}">${cell?.text || ""}</td>`;
+      return `<td class="${className}">${escHtml(cell?.text || "")}</td>`;
     }).join("");
     return `
       <tr class="${isWeekBoundary ? "week-separator" : ""}">
@@ -1864,7 +1860,7 @@ function renderSchedulingWorkbenchV2(currentUser) {
       .filter((item) => item.assignment);
 
     if (!matches.length) {
-      resultArea.innerHTML = `<div class="empty-state" style="margin-top:12px;"><p>${emp?.name || empId} 在 ${formatDate(startDate)} ~ ${formatDate(endDate)} 沒有排班記錄。</p></div>`;
+      resultArea.innerHTML = `<div class="empty-state" style="margin-top:12px;"><p>${escHtml(emp?.name || empId)} 在 ${escHtml(formatDate(startDate))} ~ ${escHtml(formatDate(endDate))} 沒有排班記錄。</p></div>`;
       return;
     }
 
@@ -2194,11 +2190,11 @@ function openMileageTableWindow() {
     return `
       <tr>
         <td class="center">${item.id}</td>
-        <td class="route-name">${item.name}</td>
+        <td class="route-name">${escHtml(item.name)}</td>
         <td${amClass}${canEdit && item.am !== "X" ? ` class="editable" data-id="${item.id}" data-field="am"` : ""}>${amVal}</td>
         <td${pmClass}${canEdit && item.pm !== "X" ? ` class="editable" data-id="${item.id}" data-field="pm"` : ""}>${pmVal}</td>
         <td class="total-cell">${item.total}</td>
-        <td class="note-cell"${canEdit ? ` data-id="${item.id}" data-field="note"` : ""}>${item.note || ""}</td>
+        <td class="note-cell"${canEdit ? ` data-id="${item.id}" data-field="note"` : ""}>${escHtml(item.note || "")}</td>
       </tr>
     `;
   }).join("");
@@ -2319,6 +2315,8 @@ function openMileageTableWindow() {
 
 // Global callback for mileage popup to update state
 window.updateMileageItem = function(id, field, value) {
+  const allowedFields = ["am", "pm", "total", "note"];
+  if (!allowedFields.includes(field)) return;
   if (!state.mileageTable) return;
   const item = state.mileageTable.find((m) => m.id === id);
   if (item) {
@@ -2456,17 +2454,17 @@ function openMonthlySchedulePrintWindow(startDate, endDate) {
   if (data.reliefHeaders.length) headerRow2 += `<th colspan="${data.reliefHeaders.length}" style="${thStyle}">抵休</th>`;
   headerRow2 += `<th style="${thStyle}">軍功/抵休</th>`;
   headerRow2 += `<th style="${thStyle}">晚班/抵休</th>`;
-  data.urbanRouteInfos.forEach((info) => { headerRow2 += `<th style="${thStyle}">${info.shortName}</th>`; });
+  data.urbanRouteInfos.forEach((info) => { headerRow2 += `<th style="${thStyle}">${escHtml(info.shortName)}</th>`; });
 
   // Build header row 3 (employee names under group headers) — white bg, black bold text
   let headerRow3 = "";
   for (let i = 0; i < leaveCols; i++) headerRow3 += `<th style="${thStyle}"></th>`;
   headerRow3 += `<th colspan="2" style="${thStyle}"></th>`;
-  data.teamLeaderHeaders.forEach((h) => { headerRow3 += `<th style="${thStyle}">${h.name}</th>`; });
-  data.reliefHeaders.forEach((h) => { headerRow3 += `<th style="${thStyle}">${h.name}</th>`; });
-  headerRow3 += `<th style="${thStyle}">${data.militaryReliefHeader.name}</th>`;
-  headerRow3 += `<th style="${thStyle}">${data.eveningReliefHeader.name}</th>`;
-  data.urbanRouteInfos.forEach((info) => { headerRow3 += `<th style="${thStyle}">${info.ownerShortName}</th>`; });
+  data.teamLeaderHeaders.forEach((h) => { headerRow3 += `<th style="${thStyle}">${escHtml(h.name)}</th>`; });
+  data.reliefHeaders.forEach((h) => { headerRow3 += `<th style="${thStyle}">${escHtml(h.name)}</th>`; });
+  headerRow3 += `<th style="${thStyle}">${escHtml(data.militaryReliefHeader.name)}</th>`;
+  headerRow3 += `<th style="${thStyle}">${escHtml(data.eveningReliefHeader.name)}</th>`;
+  data.urbanRouteInfos.forEach((info) => { headerRow3 += `<th style="${thStyle}">${escHtml(info.ownerShortName)}</th>`; });
 
   // Build data rows
   let dataRows = "";
@@ -2482,18 +2480,18 @@ function openMonthlySchedulePrintWindow(startDate, endDate) {
     for (let i = 0; i < leaveCols; i++) {
       const lv = row.leaveNames[i];
       if (lv) {
-        dataRows += `<td style="background:${colorMap[lv.color]};-webkit-print-color-adjust:exact;print-color-adjust:exact;">${lv.name}</td>`;
+        dataRows += `<td style="background:${colorMap[lv.color]};-webkit-print-color-adjust:exact;print-color-adjust:exact;">${escHtml(lv.name)}</td>`;
       } else {
         dataRows += `<td></td>`;
       }
     }
-    dataRows += `<td colspan="2">${(row.specialNotes || []).join("、")}</td>`;
-    dataRows += `<td>${(row.mergedLineRoutes || []).join("")}</td>`;
-    row.teamLeaderCells.forEach((c) => { dataRows += `<td style="${cellStyle(c)}">${c.text}</td>`; });
-    row.reliefCells.forEach((c) => { dataRows += `<td style="${cellStyle(c)}">${c.text}</td>`; });
-    dataRows += `<td style="${cellStyle(row.militaryCell)}">${row.militaryCell.text}</td>`;
-    dataRows += `<td style="${cellStyle(row.eveningCell)}">${row.eveningCell.text}</td>`;
-    row.urbanCells.forEach((c) => { dataRows += `<td style="${cellStyle(c)}">${c.text}</td>`; });
+    dataRows += `<td colspan="2">${(row.specialNotes || []).map((n) => escHtml(n)).join("、")}</td>`;
+    dataRows += `<td>${(row.mergedLineRoutes || []).map((r) => escHtml(r)).join("")}</td>`;
+    row.teamLeaderCells.forEach((c) => { dataRows += `<td style="${cellStyle(c)}">${escHtml(c.text)}</td>`; });
+    row.reliefCells.forEach((c) => { dataRows += `<td style="${cellStyle(c)}">${escHtml(c.text)}</td>`; });
+    dataRows += `<td style="${cellStyle(row.militaryCell)}">${escHtml(row.militaryCell.text)}</td>`;
+    dataRows += `<td style="${cellStyle(row.eveningCell)}">${escHtml(row.eveningCell.text)}</td>`;
+    row.urbanCells.forEach((c) => { dataRows += `<td style="${cellStyle(c)}">${escHtml(c.text)}</td>`; });
     dataRows += "</tr>";
   });
 
@@ -2534,14 +2532,14 @@ function openMonthlySchedulePrintWindow(startDate, endDate) {
   <div class="btn-row">
     <button onclick="window.print()">🖨️ 列印</button>
   </div>
-  <h1>${data.title}   ${data.subtitle}</h1>
+  <h1>${escHtml(data.title)}   ${escHtml(data.subtitle)}</h1>
   <table>
     <thead>
       <tr>${headerRow2}</tr>
       <tr>${headerRow3}</tr>
     </thead>
     <tbody>${dataRows}
-      <tr class="note-row"><td colspan="2" style="font-weight:bold;text-align:center;">備註</td><td colspan="${totalCols - 2}" style="text-align:left;white-space:pre-wrap;">${state.exportNote || ""}</td></tr>
+      <tr class="note-row"><td colspan="2" style="font-weight:bold;text-align:center;">備註</td><td colspan="${totalCols - 2}" style="text-align:left;white-space:pre-wrap;">${escHtml(state.exportNote || "")}</td></tr>
     </tbody>
   </table>
   <script>
@@ -2831,8 +2829,8 @@ function openRangeBoardWindow(startDate, endDate) {
         if (amAsg.source === "override" || pmAsg.source === "override") metaParts.push("異動");
         return `
           <td class="override-cell" style="white-space:pre-line;">
-            <div class="month-route">${routeText}</div>
-            <div class="month-meta">${metaParts.join(" / ") || "-"}</div>
+            <div class="month-route">${escHtml(routeText)}</div>
+            <div class="month-meta">${escHtml(metaParts.join(" / ") || "-")}</div>
           </td>
         `;
       }
@@ -2860,8 +2858,8 @@ function openRangeBoardWindow(startDate, endDate) {
         : (secondaryRoute ? `\u4f75\u7dda / ${status}` : status);
       return `
         <td class="${cellClass}">
-          <div class="month-route">${routeText}</div>
-          <div class="month-meta">${secondaryText}${sourceLabel ? ` / ${sourceLabel}` : ""}</div>
+          <div class="month-route">${escHtml(routeText)}</div>
+          <div class="month-meta">${escHtml(secondaryText)}${sourceLabel ? ` / ${escHtml(sourceLabel)}` : ""}</div>
         </td>
       `;
     }).join("");
@@ -3880,11 +3878,12 @@ function updateLabels(formData, currentUser) {
 
 function updateCompanyHolidays(formData, currentUser) {
   state.companySettings.weekendDaysOff = true;
+  const datePattern = /^\d{4}-\d{2}-\d{2}$/;
   state.companySettings.holidays = [...new Set(
     formData.get("holidays")
       .split(/\r?\n/)
       .map((value) => value.trim())
-      .filter(Boolean)
+      .filter((value) => datePattern.test(value))
   )].sort();
 
   logAction({
@@ -4040,6 +4039,9 @@ function renderDataManagementPanel(currentUser) {
       } catch (err) {
         window.alert("JSON 解析失敗：" + err.message);
       }
+    };
+    reader.onerror = () => {
+      window.alert("檔案讀取失敗，請確認檔案是否正確。");
     };
     reader.readAsText(file);
   });
