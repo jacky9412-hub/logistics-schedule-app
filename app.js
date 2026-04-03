@@ -1,5 +1,17 @@
 const STORAGE_KEY = "logistics-schedule-app-state-v7";
 const SESSION_AUTH_KEY = "logistics-schedule-auth-cache";
+const MAX_AUDIT_LOGS = 500;
+
+// ─── XSS Protection ───
+function escHtml(str) {
+  if (!str) return "";
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
 
 // ─── Firebase Configuration ───
 const firebaseConfig = {
@@ -277,6 +289,9 @@ function sortedRoutes() {
 }
 
 function makeId(prefix) {
+  if (typeof crypto !== "undefined" && crypto.randomUUID) {
+    return `${prefix}-${crypto.randomUUID().slice(0, 8)}`;
+  }
   return `${prefix}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
@@ -1163,6 +1178,10 @@ function logAction({ actorId, action, targetType, targetId, summary, detail }) {
     summary,
     detail,
   });
+  // Prevent unbounded growth — keep only the most recent entries
+  if (state.auditLogs.length > MAX_AUDIT_LOGS) {
+    state.auditLogs.length = MAX_AUDIT_LOGS;
+  }
 }
 
 function buildStatCard(label, value, meta) {
@@ -1193,14 +1212,14 @@ function employeeOptions({ includeAll = true, includeReliefOnly = false } = {}) 
       const tags = [roleLabels[employee.role]];
       if (employee.isRelief) tags.push("抵休");
       if (!employee.isRelief && employee.canCoverShift) tags.push("可支援代班");
-      return `<option value="${employee.id}">${employee.name} | ${tags.join(" | ")}</option>`;
+      return `<option value="${escHtml(employee.id)}">${escHtml(employee.name)} | ${escHtml(tags.join(" | "))}</option>`;
     })
     .join("");
 }
 
 function routeOptions() {
   return sortedRoutes()
-    .map((route) => `<option value="${route.id}">${route.name} | 核定里程 ${route.approvedMileage}</option>`)
+    .map((route) => `<option value="${escHtml(route.id)}">${escHtml(route.name)} | 核定里程 ${route.approvedMileage}</option>`)
     .join("");
 }
 
@@ -1452,7 +1471,7 @@ function renderEmployeeHome(currentUser) {
   profile.className = "card stat-card";
   profile.innerHTML = `
     <p class="stat-label">人員資訊</p>
-    <p class="stat-value">${currentUser.name}</p>
+    <p class="stat-value">${escHtml(currentUser.name)}</p>
     <div class="tag-row">
       <span class="tag">${roleLabels[currentUser.role]}</span>
       <span class="tag">${getLabel("shifts", currentUser.shift)}</span>
@@ -1511,20 +1530,20 @@ function renderAssignmentTable(assignments, includeEmployee = true) {
     const route = getRouteById(assignment.routeId);
     const secondaryRoute = assignment.secondaryRouteId ? getRouteById(assignment.secondaryRouteId) : null;
     const defaultRoute = getDefaultRoute(employee);
-    const routeDisplay = route ? (secondaryRoute ? `上午：${route.name}<br>下午：${secondaryRoute.name}` : route.name) : "-";
+    const routeDisplay = route ? (secondaryRoute ? `上午：${escHtml(route.name)}<br>下午：${escHtml(secondaryRoute.name)}` : escHtml(route.name)) : "-";
     const mileageDisplay = secondaryRoute ? "參照里程表" : (route ? `${route.approvedMileage} 公里` : "-");
     const statusDisplay = getLabel("statuses", assignment.status) + (secondaryRoute ? " / 併線" : "");
     return `
       <tr>
         <td>${formatDate(assignment.date)}</td>
-        ${includeEmployee ? `<td>${employee ? employee.name : assignment.employeeId}</td>` : ""}
-        <td>${defaultRoute ? defaultRoute.name : "未指定路線"}</td>
+        ${includeEmployee ? `<td>${employee ? escHtml(employee.name) : escHtml(assignment.employeeId)}</td>` : ""}
+        <td>${defaultRoute ? escHtml(defaultRoute.name) : "未指定路線"}</td>
         <td>${routeDisplay}</td>
         <td>${mileageDisplay}</td>
         <td>${statusDisplay}</td>
         <td>${assignment.leaveType ? getLabel("leaveTypes", assignment.leaveType) : "-"}</td>
         <td>${assignment.source === "default" ? "固定配置" : "異動覆蓋"}</td>
-        <td>${assignment.note || "-"}</td>
+        <td>${escHtml(assignment.note) || "-"}</td>
       </tr>
     `;
   }).join("");
@@ -1867,7 +1886,7 @@ function renderSchedulingWorkbenchV2(currentUser) {
                 <span class="pill">${a.source === "default" ? "固定配置" : "異動覆蓋"}</span>
                 ${a.isMergedLine ? `<span class="pill alert">併線</span>` : ""}
               </div>
-              <p class="muted" style="margin:0;">路線：${route ? route.name : "未指定"}${secRoute ? ` ｜ 併線：${secRoute.name}` : ""}${a.abcSection ? ` ｜ ABC段：${a.abcSection}` : ""}${a.specialNote ? ` ｜ 特殊記載：${a.specialNote}` : ""} ｜ 備註：${a.note || "無"}</p>
+              <p class="muted" style="margin:0;">路線：${route ? escHtml(route.name) : "未指定"}${secRoute ? ` ｜ 併線：${escHtml(secRoute.name)}` : ""}${a.abcSection ? ` ｜ ABC段：${escHtml(a.abcSection)}` : ""}${a.specialNote ? ` ｜ 特殊記載：${escHtml(a.specialNote)}` : ""} ｜ 備註：${escHtml(a.note) || "無"}</p>
             </div>
             <div style="display:flex;gap:6px;flex-shrink:0;">
               <button type="button" class="secondary editSingleButton" data-asg-id="${a.id}">編輯</button>
@@ -2067,7 +2086,7 @@ function renderSchedulingWorkbenchV2(currentUser) {
           <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;">
             <div>
               <p class="stat-label">${formatDate(n.startDate)} ~ ${formatDate(n.endDate)}</p>
-              <p class="muted" style="margin:0;">${n.note}</p>
+              <p class="muted" style="margin:0;">${escHtml(n.note)}</p>
             </div>
             <button type="button" class="warn deleteDsnButton" data-dsn-id="${n.id}">刪除</button>
           </div>
@@ -2100,19 +2119,19 @@ function openDailyBoardWindow() {
     const route = getRouteById(assignment.routeId);
     const secondaryRoute = assignment.secondaryRouteId ? getRouteById(assignment.secondaryRouteId) : null;
     const defaultRoute = getDefaultRoute(employee);
-    const routeDisplay = route ? (secondaryRoute ? `上午：${route.name} / 下午：${secondaryRoute.name}` : route.name) : "-";
+    const routeDisplay = route ? (secondaryRoute ? `上午：${escHtml(route.name)} / 下午：${escHtml(secondaryRoute.name)}` : escHtml(route.name)) : "-";
     const mileageDisplay = secondaryRoute ? "參照里程表" : (route ? `${route.approvedMileage} 公里` : "-");
     const statusDisplay = getLabel("statuses", assignment.status) + (secondaryRoute ? " / 併線" : "");
     return `
       <tr>
-        <td>${employee ? employee.name : assignment.employeeId}</td>
+        <td>${employee ? escHtml(employee.name) : escHtml(assignment.employeeId)}</td>
         <td>${roleLabels[employee?.role] || "-"}</td>
-        <td>${defaultRoute ? defaultRoute.name : "未指定路線"}</td>
+        <td>${defaultRoute ? escHtml(defaultRoute.name) : "未指定路線"}</td>
         <td>${routeDisplay}</td>
         <td>${mileageDisplay}</td>
         <td>${statusDisplay}</td>
         <td>${assignment.source === "default" ? "固定配置" : "異動覆蓋"}</td>
-        <td>${assignment.note || "-"}</td>
+        <td>${escHtml(assignment.note) || "-"}</td>
       </tr>
     `;
   }).join("");
@@ -2346,10 +2365,10 @@ function openLeaveSummaryWindow(startDate, endDate) {
       detailRows += `
         <tr${idx === 0 ? ' class="date-first"' : ""}>
           ${idx === 0 ? `<td rowspan="${assignments.length}" class="date-cell">${formatDate(date)}</td>` : ""}
-          <td>${emp ? emp.name : a.employeeId}</td>
+          <td>${emp ? escHtml(emp.name) : escHtml(a.employeeId)}</td>
           <td><strong>${getLabel("leaveTypes", a.leaveType)}</strong></td>
           <td>${dpLabel}</td>
-          <td>${a.note || "-"}</td>
+          <td>${escHtml(a.note) || "-"}</td>
         </tr>
       `;
     });
@@ -2849,7 +2868,7 @@ function openRangeBoardWindow(startDate, endDate) {
     return `
       <tr data-has-override="${hasOverride}">
         <th class="sticky-name">
-          <div>${employee.name}</div>
+          <div>${escHtml(employee.name)}</div>
           <small>${roleLabels[employee.role] || "-"}</small>
         </th>
         ${cells}
@@ -3446,7 +3465,7 @@ function renderMasterDataPanel(currentUser) {
       <label>選擇既有員工
         <select name="existingEmployeeId">
           <option value="">新增員工</option>
-          ${[...state.employees].sort(compareEmployeesByScheduleOrder).map((employee) => `<option value="${employee.id}">${employee.name}</option>`).join("")}
+          ${[...state.employees].sort(compareEmployeesByScheduleOrder).map((employee) => `<option value="${escHtml(employee.id)}">${escHtml(employee.name)}</option>`).join("")}
         </select>
       </label>
       <div class="action-row">
@@ -3510,7 +3529,7 @@ function renderMasterDataPanel(currentUser) {
       .sort(compareEmployeesByScheduleOrder)
       .map((emp) => {
         const individualPin = (state.pinSettings.individual && state.pinSettings.individual[emp.id]) || "";
-        return `<label>${emp.name}（${roleLabels[emp.role]}）<input name="individual_${emp.id}" type="password" value="${individualPin}" maxlength="8" placeholder="未設定則用角色預設"></label>`;
+        return `<label>${escHtml(emp.name)}（${roleLabels[emp.role]}）<input name="individual_${escHtml(emp.id)}" type="password" value="${escHtml(individualPin)}" maxlength="8" placeholder="未設定則用角色預設"></label>`;
       })
       .join("");
 
@@ -3667,9 +3686,9 @@ function renderEmployeeTable() {
       const defaultRoute = getDefaultRoute(employee);
       return `
         <tr>
-          <td>${employee.name}</td>
+          <td>${escHtml(employee.name)}</td>
           <td>${roleLabels[employee.role]}</td>
-          <td>${defaultRoute ? `${defaultRoute.name} / ${getLabel("shifts", employee.shift)}` : "未指定路線"}</td>
+          <td>${defaultRoute ? `${escHtml(defaultRoute.name)} / ${getLabel("shifts", employee.shift)}` : "未指定路線"}</td>
           <td>${employee.canCoverShift ? "是" : "否"}</td>
           <td>${employmentStatusLabels[employee.employmentStatus || "active"]}</td>
         </tr>
@@ -3703,10 +3722,10 @@ function renderRouteTable() {
       const owner = state.employees.find((employee) => employee.defaultRouteId === route.id);
       return `
         <tr>
-          <td>${route.name}</td>
+          <td>${escHtml(route.name)}</td>
           <td>${displayRouteType(route.type)}</td>
           <td>${route.approvedMileage} 公里</td>
-          <td>${owner ? owner.name : "未指定"}</td>
+          <td>${owner ? escHtml(owner.name) : "未指定"}</td>
         </tr>
       `;
     })
@@ -4004,7 +4023,17 @@ function renderDataManagementPanel(currentUser) {
           window.alert("檔案格式不正確，缺少必要的資料欄位。");
           return;
         }
-        Object.assign(state, imported);
+        // Only import known safe fields to prevent injection of arbitrary properties
+        const safeFields = [
+          "employees", "routes", "assignments", "companySettings",
+          "labelSettings", "pinSettings", "mileageTable", "auditLogs",
+          "dateSpecialNotes", "exportNote",
+        ];
+        safeFields.forEach((field) => {
+          if (imported[field] !== undefined) {
+            state[field] = imported[field];
+          }
+        });
         saveState();
         window.alert("資料已成功匯入回復（含同步至雲端）。頁面將重新載入。");
         location.reload();
@@ -4059,9 +4088,9 @@ function renderAuditPanel() {
     const item = document.createElement("article");
     item.className = "timeline-item";
     item.innerHTML = `
-      <p><strong>${log.summary}</strong></p>
-      <p>${log.detail}</p>
-      <p class="muted">${formatTimestamp(log.timestamp)} ｜ ${actor ? actor.name : "系統"} ｜ ${log.action}</p>
+      <p><strong>${escHtml(log.summary)}</strong></p>
+      <p>${escHtml(log.detail)}</p>
+      <p class="muted">${formatTimestamp(log.timestamp)} ｜ ${actor ? escHtml(actor.name) : "系統"} ｜ ${escHtml(log.action)}</p>
     `;
     timeline.appendChild(item);
   });
