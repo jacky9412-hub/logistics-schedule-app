@@ -3565,12 +3565,13 @@ function renderMasterDataPanel(currentUser) {
     // Remove related assignments
     state.assignments = state.assignments.filter((a) => a.employeeId !== empId);
     // Audit log
-    state.auditLog.push({
-      timestamp: new Date().toISOString(),
-      user: currentUser.name,
-      role: currentUser.role,
-      action: "deleteEmployee",
+    logAction({
+      actorId: currentUser.id,
+      action: "employee-delete",
+      targetType: "employee",
+      targetId: empId,
       summary: `刪除員工 ${emp.name}`,
+      detail: `已刪除員工「${emp.name}」及其所有排班記錄。`,
     });
     // Extend echo delay to prevent Firebase listener from restoring deleted data
     lastFirebaseSaveTime = Date.now() + 5000;
@@ -4332,10 +4333,6 @@ async function attemptFirebaseInit() {
     } catch (e) { /* keep retrying silently */ }
   }, 10000);
 })();
-
-
-
-
 
 
 
