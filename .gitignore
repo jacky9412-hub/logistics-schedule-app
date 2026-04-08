@@ -3,3 +3,10 @@ node_modules/
 *.log
 .DS_Store
 Thumbs.db
+
+# 本地暫存與工具檔案
+backup/
+temp_*.txt
+temp_*.json
+.claude/settings.local.json
+.playwright-cli/
