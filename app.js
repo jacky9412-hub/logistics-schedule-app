@@ -137,7 +137,7 @@ const roleLabels = {
 };
 
 const fixedEmployeeOrderByName = new Map([
-  ["洪主任", 1],
+  ["主任", 1],
   ["宏擷", 2],
   ["凱強", 3],
   ["明怡", 4],
@@ -266,7 +266,7 @@ const specialStaffSeeds = [
   { name: "邦漢", role: "reliefStaff", isRelief: true },
   { name: "翔清", role: "reliefStaff", isRelief: true },
   { name: "明怡", role: "adminStaff", isRelief: false },
-  { name: "洪主任", role: "supervisor", isRelief: false },
+  { name: "主任", role: "supervisor", isRelief: false },
 ];
 
 const shiftCoverageOperators = new Set([
