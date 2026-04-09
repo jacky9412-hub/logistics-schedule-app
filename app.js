@@ -1107,10 +1107,33 @@ function buildMonthlyExportData(startDate, endDate) {
 
     // Urban route columns
     const urbanCells = urbanRouteInfos.map((info) => {
-      const computeCell = () => {
+      // 計算單一時段（或全天）的路線格內容
+      const computeCellForPart = (partFilter) => {
         if (!info.owner) return { text: "", color: null, mergeEligible: false };
-        const assignment = getAssignmentByEmployeeDate(info.owner.id, dateStr);
+
+        const ownerAssignments = getAssignmentsByEmployeeDate(info.owner.id, dateStr);
+        // 依時段過濾：partFilter 為 null 代表全天模式（取 full 或唯一紀錄），"am"/"pm" 取對應半日
+        let assignment;
+        if (partFilter) {
+          assignment = ownerAssignments.find((a) => a.dayPart === partFilter);
+        } else {
+          assignment = ownerAssignments.find((a) => !a.dayPart || a.dayPart === "full") || ownerAssignments[0];
+        }
+
         if (!assignment) {
+          // 路線主人此時段無紀錄，但可能有人代班此路線
+          const coverer = allDateAssignments.find((a) => {
+            if (a.employeeId === info.owner.id) return false;
+            if (partFilter && a.dayPart && a.dayPart !== "full" && a.dayPart !== partFilter) return false;
+            const r = getRouteById(a.routeId);
+            return r && r.name === info.routeName;
+          });
+          if (coverer) {
+            const covEmp = getEmployeeById(coverer.employeeId);
+            if (covEmp) {
+              return { text: covEmp.name, color: "lightblue", mergeEligible: true };
+            }
+          }
           return { text: "", color: null, mergeEligible: isCompactMergedRoute(info.routeName) };
         }
 
@@ -1143,6 +1166,7 @@ function buildMonthlyExportData(startDate, endDate) {
         // Check if someone is covering this route (find assignment with this routeId from someone else)
         const coverer = allDateAssignments.find((a) => {
           if (a.employeeId === info.owner.id) return false;
+          if (partFilter && a.dayPart && a.dayPart !== "full" && a.dayPart !== partFilter) return false;
           const r = getRouteById(a.routeId);
           return r && r.name === info.routeName;
         });
@@ -1158,6 +1182,64 @@ function buildMonthlyExportData(startDate, endDate) {
           return { text: assignment.abcSection, color: null, mergeEligible: true };
         }
         return { text: "", color: null, mergeEligible: true };
+      };
+
+      const computeCell = () => {
+        if (!info.owner) return { text: "", color: null, mergeEligible: false };
+
+        // 檢查路線主人是否有半日 assignment
+        const ownerAssignments = getAssignmentsByEmployeeDate(info.owner.id, dateStr);
+        const amAsg = ownerAssignments.find((a) => a.dayPart === "am");
+        const pmAsg = ownerAssignments.find((a) => a.dayPart === "pm");
+
+        // 也檢查是否有人以半日方式代班此路線
+        const amCoverer = allDateAssignments.find((a) => {
+          if (a.employeeId === info.owner.id) return false;
+          if (a.dayPart !== "am") return false;
+          const r = getRouteById(a.routeId);
+          return r && r.name === info.routeName;
+        });
+        const pmCoverer = allDateAssignments.find((a) => {
+          if (a.employeeId === info.owner.id) return false;
+          if (a.dayPart !== "pm") return false;
+          const r = getRouteById(a.routeId);
+          return r && r.name === info.routeName;
+        });
+
+        const hasHalfDay = amAsg || pmAsg || amCoverer || pmCoverer;
+
+        if (hasHalfDay && (amAsg || amCoverer) && (pmAsg || pmCoverer)) {
+          // 上下午都有紀錄，分開計算再合併
+          const amResult = computeCellForPart("am");
+          const pmResult = computeCellForPart("pm");
+          const amText = amResult.text || "";
+          const pmText = pmResult.text || "";
+          if (amText === "X" && pmText === "X") {
+            return { text: "X", color: amResult.color || pmResult.color, mergeEligible: false };
+          }
+          if (amText === pmText && amResult.color === pmResult.color) {
+            // 上下午結果一樣，不需要拆開顯示
+            return amResult;
+          }
+          const text = `(上)${amText || "-"}\n(下)${pmText || "-"}`;
+          const color = amResult.color || pmResult.color || "yellow";
+          const mergeEligible = amResult.mergeEligible && pmResult.mergeEligible;
+          return { text, color, mergeEligible };
+        }
+
+        if (hasHalfDay && (amAsg || amCoverer || pmAsg || pmCoverer)) {
+          // 只有單一半日紀錄
+          const part = (amAsg || amCoverer) ? "am" : "pm";
+          const result = computeCellForPart(part);
+          if (result.text) {
+            const prefix = part === "am" ? "(上)" : "(下)";
+            result.text = `${prefix}${result.text}`;
+          }
+          return result;
+        }
+
+        // 全天或無紀錄
+        return computeCellForPart(null);
       };
 
       const result = computeCell();
