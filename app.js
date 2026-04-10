@@ -1126,6 +1126,9 @@ function buildMonthlyExportData(startDate, endDate) {
           const coverer = allDateAssignments.find((a) => {
             if (a.employeeId === info.owner.id) return false;
             if (partFilter && a.dayPart && a.dayPart !== "full" && a.dayPart !== partFilter) return false;
+            // 排除沒有固定路線的浮動人員（如建凱、玉女），他們只顯示在休假欄
+            const covEmpCheck = getEmployeeById(a.employeeId);
+            if (covEmpCheck && !covEmpCheck.defaultRouteId) return false;
             const r = getRouteById(a.routeId);
             return r && r.name === info.routeName;
           });
@@ -1168,6 +1171,9 @@ function buildMonthlyExportData(startDate, endDate) {
         const coverer = allDateAssignments.find((a) => {
           if (a.employeeId === info.owner.id) return false;
           if (partFilter && a.dayPart && a.dayPart !== "full" && a.dayPart !== partFilter) return false;
+          // 排除沒有固定路線的浮動人員（如建凱、玉女），他們只顯示在休假欄
+          const covEmpCheck = getEmployeeById(a.employeeId);
+          if (covEmpCheck && !covEmpCheck.defaultRouteId) return false;
           const r = getRouteById(a.routeId);
           return r && r.name === info.routeName;
         });
@@ -1193,16 +1199,20 @@ function buildMonthlyExportData(startDate, endDate) {
         const amAsg = ownerAssignments.find((a) => a.dayPart === "am");
         const pmAsg = ownerAssignments.find((a) => a.dayPart === "pm");
 
-        // 也檢查是否有人以半日方式代班此路線
+        // 也檢查是否有人以半日方式代班此路線（排除無固定路線的浮動人員）
         const amCoverer = allDateAssignments.find((a) => {
           if (a.employeeId === info.owner.id) return false;
           if (a.dayPart !== "am") return false;
+          const covEmpCheck = getEmployeeById(a.employeeId);
+          if (covEmpCheck && !covEmpCheck.defaultRouteId) return false;
           const r = getRouteById(a.routeId);
           return r && r.name === info.routeName;
         });
         const pmCoverer = allDateAssignments.find((a) => {
           if (a.employeeId === info.owner.id) return false;
           if (a.dayPart !== "pm") return false;
+          const covEmpCheck = getEmployeeById(a.employeeId);
+          if (covEmpCheck && !covEmpCheck.defaultRouteId) return false;
           const r = getRouteById(a.routeId);
           return r && r.name === info.routeName;
         });
