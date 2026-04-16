@@ -1125,6 +1125,7 @@ function buildMonthlyExportData(startDate, endDate) {
           // 路線主人此時段無紀錄，但可能有人代班此路線
           const coverer = allDateAssignments.find((a) => {
             if (a.employeeId === info.owner.id) return false;
+            if (a.status === "leave") return false; // 休假不算代班
             if (partFilter && a.dayPart && a.dayPart !== "full" && a.dayPart !== partFilter) return false;
             // 排除沒有固定路線的浮動人員（如建凱、玉女），他們只顯示在休假欄
             const covEmpCheck = getEmployeeById(a.employeeId);
@@ -1170,6 +1171,7 @@ function buildMonthlyExportData(startDate, endDate) {
         // Check if someone is covering this route (find assignment with this routeId from someone else)
         const coverer = allDateAssignments.find((a) => {
           if (a.employeeId === info.owner.id) return false;
+          if (a.status === "leave") return false; // 休假不算代班
           if (partFilter && a.dayPart && a.dayPart !== "full" && a.dayPart !== partFilter) return false;
           // 排除沒有固定路線的浮動人員（如建凱、玉女），他們只顯示在休假欄
           const covEmpCheck = getEmployeeById(a.employeeId);
@@ -1202,6 +1204,7 @@ function buildMonthlyExportData(startDate, endDate) {
         // 也檢查是否有人以半日方式代班此路線（排除無固定路線的浮動人員）
         const amCoverer = allDateAssignments.find((a) => {
           if (a.employeeId === info.owner.id) return false;
+          if (a.status === "leave") return false; // 休假不算代班
           if (a.dayPart !== "am") return false;
           const covEmpCheck = getEmployeeById(a.employeeId);
           if (covEmpCheck && !covEmpCheck.defaultRouteId) return false;
@@ -1210,6 +1213,7 @@ function buildMonthlyExportData(startDate, endDate) {
         });
         const pmCoverer = allDateAssignments.find((a) => {
           if (a.employeeId === info.owner.id) return false;
+          if (a.status === "leave") return false; // 休假不算代班
           if (a.dayPart !== "pm") return false;
           const covEmpCheck = getEmployeeById(a.employeeId);
           if (covEmpCheck && !covEmpCheck.defaultRouteId) return false;
